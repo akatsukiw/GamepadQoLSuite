@@ -93,7 +93,7 @@ This mod requires **CustomGamepadUI**. Install and enable it first:
 
 ```bash
 cd "C:/Users/<you>/Zomboid/mods"
-git clone https://github.com/<your-username>/GamepadQoLSuite.git
+git clone https://github.com/akatsukiw/GamepadQoLSuite.git
 ```
 
 (The cloned folder is already named `GamepadQoLSuite`, so no renaming is needed.)

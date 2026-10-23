@@ -93,7 +93,7 @@
 
 ```bash
 cd "C:/Users/<你的用户名>/Zomboid/mods"
-git clone https://github.com/<你的用户名>/GamepadQoLSuite.git
+git clone https://github.com/akatsukiw/GamepadQoLSuite.git
 ```
 
 （clone 下来的目录名天然就是 `GamepadQoLSuite`，无需改名。）
