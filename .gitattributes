@@ -1,0 +1,4 @@
+# Mod files must stay byte-identical after checkout.
+# Project Zomboid reads Lua and translation files as-is, so never let git
+# normalise line endings (the shipped files are CRLF).
+* -text

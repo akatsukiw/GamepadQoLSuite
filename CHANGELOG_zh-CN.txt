@@ -1,0 +1,2132 @@
+v1.5.1.50（修正：撤回 .42 误加的两个轮盘图标，恢复使用 CustomGamepadUI 自带图标）
+
+- 删除 `42/media/ui/icon_light_bulb.png` 与 `42/media/ui/icon_glass_broken.png`。这两个文件是 v1.5.1.42 误加的：它们与前置模组 CustomGamepadUI 的 `media/ui/` 同名，本模组后加载，会把上游原有图标覆盖成自制版本。
+- v1.5.1.41 及更早版本本身没有这两个文件，轮盘切片（上轮盘开关灯 / 打碎玻璃，下轮盘移除碎玻璃 / 开关收音机）的图标一直由 CustomGamepadUI 提供，显示正常。
+- `GQSTileRadialMenuFix.lua` 的改动保持不变：两个 provider 的 `rightRadialLightSwitchEnabled` / `rightRadialSmashWindowEnabled` 开关是本次唯一需要的功能，代码未回退。
+- 覆盖安装注意：v1.5.1.49 及更早的安装目录里仍有这两个 PNG，请手动删除，否则图标仍会被覆盖（增量补丁的 README 已注明）。
+
+
+v1.5.1.49（收尾：临时日志类别全部关闭）
+
+- `GQSDebugLog.lua` 里临时打开过的日志类别全部改回 `false`：`multiSelect`、`xTransfer`（.46~.48 排查用），以及 `fitnessUI`、`panelInfo`、`mixedAutoDrink`。
+- 全部诊断日志语句原样保留：分类开关本身就是预留的 debug 接口，以后复查问题时把对应类别改回 `true` 即可重新取到日志，不需要再出新版本。
+
+
+v1.5.1.48（修复：物品栏无法全选；收藏物品不能再转进搜寻容器）
+
+修复一：随身容器的「物品栏」无法全选
+- 日志实证：物品栏每次都是 `gmsState=0 paneSelected=1`，于是每次都走「清空」分支，从来没有执行过全选；而「背包」是 `paneSelected=0`，全选正常。
+- 根因：原版 `pane.selected` 在角色物品栏里会残留一条条目（日志里固定是第 3 行，也就是「已装备物品」那个分组行），容器不重绘时没有任何东西会清掉它。上一版把它也算作「已有选中」，结果每次按键都只是清掉这条看不见的残留。
+- 修复：`paneHasSelection` 只认本模组自己的多选状态（`gmsSelectionState`），不再参考原版 `pane.selected`。原版单选高亮只是「当前焦点行」，不算多选，不应该阻塞全选。
+
+修复二：收藏物品可以被长按X转进搜寻容器（单人模式）
+- 日志实证：`transfer candidate: name=工业染料 favorite=true transferable=true` + `target=crate multiplayer=false` —— 单人模式下收藏物品确实被转进了板条箱。
+- 根因：收藏保护被 `isMultiplayerSession()` 包住，单人模式整段跳过。
+- 修复：改为无条件生效——收藏物品只能在角色随身容器之间移动，不能进入搜寻/世界容器或地面。联机行为不变。
+
+说明文字
+- `全选 / 清除选择按键` 的 tooltip 改为「已经用本模组选中过物品时…」，中英文同步。
+- 本版仍保留 `multiSelect` / `xTransfer` 日志，便于再验证一轮。
+
+
+v1.5.1.47（诊断版补充：长按X转移的物品集也打日志）
+
+- 只加日志，不改行为。`xTransfer` 日志类别临时打开。
+- `rowsForTransfer` 输出：本次用到的行数、其中多少行来自多选、是否回落到焦点行、`gmsKeepSelection`、面板总行数、`pane.selected` 条目数。用于判断长按X到底拿到了哪些物品。
+- `transferToContainer` 输出：候选物品总数、目标容器类型、是否联机；并对每个候选物品输出名称、是否收藏、是否通过可转移判定。
+- 结论先行：`GQSGamepadXContainerTransfer` 全程只读选择状态，从不写 `pane.selected` / `gmsSelectionState`，因此它不可能是全选失效的原因；它的收藏限制只在联机（`isMultiplayerSession()`）下生效，单人模式不拦截收藏物品。
+
+
+v1.5.1.46（多选全选键：临时加入诊断日志）
+
+- 随身容器里的「物品栏」容器仍然无法全选，而同一页面的「背包」容器与搜索容器正常，继续排查中。
+- 本版只加日志，不改行为。`GQSMultiSelectStandalone` 会在按下全选键时输出：
+  - 命中的是摇杆按下回调还是轮询路径，以及是否被判定为「已经消费」。
+  - 容器类型、`onCharacter`、容器内物品数、行数（`items`）、分组数（`itemslist`）。
+  - 是否走「清空」分支，以及是被 `gmsSelectionState` 还是 `pane.selected` 判定的。
+  - 全选分支实际标记了多少行、跳过了多少行、应用后 `pane.selected` 有多少条。
+  - 解析不到焦点面板时，输出焦点对象与两个页面的 `paneExists / visible / focusInPane / focusInPage / contextMenu`。
+- 日志开关：`GQSDebugLog.lua` 里 `multiSelect = true`（本版临时打开，问题定位后改回 false）。
+
+
+v1.5.1.45（多选全选键改为「有选中就取消」）
+
+行为变更
+- `全选 / 清除选择按键`（默认 L3+R3）改为严格的二段式开关：
+  - 列表里只要有任何物品处于选中状态（多选、单选、鼠标点选都算），按下会先取消全部选中。
+  - 列表完全没有任何选中时，按下才会全选。
+- 此前是按「是否所有行都已选中」来判断，只要有部分行选中就会再叠加一次全选，必须先全选再按一次才能清空。
+
+修复
+- 修复随身容器（角色物品栏）全选后无法用 L3+R3 取消全选、而搜索容器正常的 bug。
+  原因：旧的判断依赖「每一行都已选中」，而角色物品栏的列表每次刷新都会重建，里面既有带 `equipped:` / `hotbar:` 前缀重命名的分组，也有原版塞进 `items[1]` 的重复表头项，持久化选择状态无法与它们一一对上，于是「全部已选中」永远判为 false，按下就只会反复全选。
+  现在改为「有没有选中」而不是「是不是全都选中」，与列表行的构造方式解耦。
+
+说明文字
+- `全选 / 清除选择按键` 的 tooltip 按新逻辑重写，中英文同步。
+
+
+v1.5.1.44（Y 组合键支持按住不放连续切换面板）
+
+行为变更
+- 按住 Y 期间可以连续使用不同方向切换面板：例如 Y+上 打开健康面板后，不松开 Y 直接按右，即可切到合成面板；再按左切建造，依此类推。
+- 此前一次按住 Y 只能执行一次组合，之后所有方向都被吞掉，必须松开 Y 重新按。
+
+保持不变
+- 组合执行后松开 Y 仍然不会额外触发普通 Y 操作（背包等），与上一版一致。
+- 同一个方向按住不放不会重复执行；松开该方向后再按同一方向可以重新执行。
+- Y+左摇杆选面板的逻辑与开关不受影响。
+
+附带调整
+- 长按 Y 时的左侧图标栏方向提示，不再在第一次组合后消失，改为一直显示到松开 Y，方便连续切换时确认方向。
+- `启用Y+方向键快捷操作` 的说明文字补上「按住Y不放、改按其他方向，可以继续切换别的面板」。
+
+
+v1.5.1.43（新增默认健身时长选项，整理开关说明文字）
+
+新增选项
+- 「面板增强」分组新增 `默认健身时长（分钟）` 滑条：10–60 分钟，步进 10，默认 30。
+- 打开健身面板时按该值自动填入时长字段；此前固定写死 30 分钟。每次打开面板都会重新读取，改完设置立即生效，不需要重载游戏。
+
+说明文字整理
+- `启用X键轻击/长按快捷转移`：按「轻击 / 长按」拆成两行。
+- `启用全部Y键增强功能`：改为「总开关 / 开启 / 关闭」三段，先说它管什么，再说两种状态的效果。
+- `启用Y+方向键快捷操作`：三行短句，去掉与总开关重复的描述。
+- `启用面板信息增强`：技能面板补上「支持RT+上下翻页」——该功能此前已实现，只是描述里漏写了。
+
+统一规则
+- 中文 tooltip 去掉中英文之间的空格，只在语义处换行。原先这些空格正是 tooltip 自动断行的位置，会出现「按住 RT 按 / B：…」这类断法。
+
+
+v1.5.1.42（方向键轮盘拓展：新增打碎玻璃与开关灯开关，重写长说明文字）
+
+新增选项
+- 「方向键轮盘拓展」分组新增两项，默认开启：
+  - `上轮盘新增打碎玻璃`
+  - `上轮盘新增开关灯`
+- 对应上方向键轮盘中已有的两个动作。关闭后该动作不再出现在轮盘里；附近没有可用目标时同样不出现（完好的窗户 / 可切换的灯开关）。
+- 分组标题由「右方向键轮盘拓展」改为「方向键轮盘拓展」——该组现在同时涵盖右轮盘的健身、技能面板与上轮盘的打碎玻璃、开关灯。
+
+补齐缺失图标
+- `media/ui/icon_light_bulb.png` 与 `media/ui/icon_glass_broken.png`：这两个路径此前已被 `GQSTileRadialMenuFix.lua` 引用，但文件不存在，轮盘切片一直没有图标。本版补齐，风格与现有图标一致（32×32 浅灰线条）。
+
+重写说明文字
+- 中文 tooltip 去掉中英文之间的空格，改为在语义处显式换行。原先那些空格正是自动断行的位置，导致出现「按住 RT 按 / B：…」这类断法。
+  - `启用 RT + B 焦点恢复与关闭面板`
+  - `启用 Y+左摇杆快捷选面板`
+  - `启用 RB 组合键拓展`
+- 「启用面板信息增强」按功能拆成三行重写：信息面板 / 技能面板 / 建造与合成面板。
+- 英文版同步调整段落结构。
+
+未改动
+- 上轮盘原有的打碎玻璃、开关灯动作逻辑本身没有修改，只是增加了开关判断。
+- 右方向键轮盘（健身 / 技能）保持不变。
+
+
+v1.5.1.41（Mod 选项面板精简：接管上游选项、隐藏调试项、调整分组顺序）
+
+接管 Custom Gamepad UI 的重复选项
+- Custom Gamepad UI 面板中的「Inventory and Loot」四项（两栏总宽度 / 角色物品栏高度 / 搜寻栏高度 / 位置布局）与「Defaults sorting method」不再显示。功能由本模组完整接管，调整统一在本模组面板进行。
+- 上述选项对象仍保留在内存中，因为 Custom Gamepad UI 自身的代码仍会读取它们；本模组会在其后覆盖结果，行为与之前一致。
+- 同时移除 v1.5.1.40 加上的「（覆盖 Custom Gamepad UI 设置）」标题后缀与 tooltip 说明——上游已不显示，无需再解释覆盖关系。
+
+分组顺序调整
+- Mod 选项面板按注册顺序排列，而 Custom Gamepad UI 是本模组的必需前置，因此它总是排在前面。本版在运行时把本模组的分组移到它前面。
+- 结果：本模组的设置在上，Custom Gamepad UI 剩余的可选项（Rack Reload、Focus Combat、Double-Click with Start、Hide Equipped Items、Hide UI Elements、Hide Not Attached Weapons、Tile Radial Menu、Offset and Expand Mechanics UI、Reset Layout）以原本的名字排在本模组之后。
+
+隐藏的选项（功能保留，仅不在面板显示）
+- `排序双击识别间隔`：排序模式 5（双击切换）的时间窗口，固定使用默认 200 毫秒。
+- `启用长按 B 键拖拽转移`：与其阈值 `B 键长按阈值`，固定使用默认值（关闭 / 200 毫秒）。
+- `X 键长按阈值`：固定使用默认 200 毫秒；`启用 X 键轻击/长按快捷转移` 仍然显示。
+
+面板清理
+- 移除顶部的「手柄体验增强套件」标题，分组直接以「背包和战利品UI」开始。
+
+实现说明
+- 隐藏采用「渲染时跳过、渲染后还原」的方式：构建面板时把标记过的条目暂时摘出，构建完成后立即放回，因此这些选项的值仍会正常写入 `ModOptions.ini`，将来需要重新显示时改一个标记即可。
+- 未修改 Custom Gamepad UI 的任何文件；全部为运行时对 `PZAPI.ModOptions` 数据表的操作。
+
+
+v1.5.1.40（整理 Mod 选项：标明覆盖关系，清理无效翻译文件）
+
+选项整理：标明与 Custom Gamepad UI 的覆盖关系
+- 排查发现「背包和战利品UI」的四项（两栏总宽度 / 角色物品栏高度 / 搜寻栏高度 / 位置布局）与 Custom Gamepad UI 的同名选项完全重复，且本模组的 `GQSPanelLayout.lua` 会在 Custom Gamepad UI 算完之后整体覆盖结果——**在 Custom Gamepad UI 面板里调这四项不会生效**。
+- 「Select 键排序」同理：本模组扩展为 6 档并接管了 Select/Back 键，Custom Gamepad UI 原本的 4 档设置不再生效。
+- 本版不删除这些选项（保留中文界面下集中调整的便利），改为把覆盖关系写进标题与 tooltip：
+  - 分组标题改为「背包和战利品UI（覆盖 Custom Gamepad UI 设置）」「Select 键排序（覆盖 Custom Gamepad UI 设置）」
+  - 四个布局项与排序项的 tooltip 增加一行说明，明确「那边调整后不会生效」
+  - 两栏总宽度 tooltip 补充默认值差异（本模组 65%，Custom Gamepad UI 50%）
+- 新增分组标题「分屏模式专用（仅本地双人分屏时生效）」，把 `splitInvLootWidth` / `splitContainerHeight` 从常规布局项中分离。这两项是本模组独有功能，Custom Gamepad UI 不支持分屏参数。
+
+修复：移除从未生效的翻译文件
+- `CN/UI_CN.txt` 与 `EN/UI_EN.txt` 的 Lua 表结构损坏（表在第 143 行提前闭合，后续 key 落在表外），整份文件无法解析，从未被游戏加载过。
+- Build 42 已改用 `Translate/<语言>/<文件>.json`，原版游戏目录中已无任何 `.txt` 翻译文件；对照 Custom Gamepad UI 自身也有同样损坏的 `.txt`，而界面显示正常，可确认 B42 不再读取 `.txt`。
+- 本版移除这两个文件，翻译统一由 `UI.json` 提供（161 个条目，中英各一份）。功能与显示均无变化。
+
+保持不变
+- 未修改 Custom Gamepad UI 的任何文件，也未改动其选项。
+- 单人模式的容器布局逻辑不变，仍由本模组的值决定；分屏参数照旧生效。
+
+
+v1.5.1.39（家具旋转代码整理，无行为变化）
+
+整理：`GQSFurnitureRotateFix.lua` 重写为最终形态
+- v1.5.1.34 ~ v1.5.1.38 是逐层排查的过程产物，代码里累积了演进痕迹（重复注释、已被取代的中间逻辑、只用于诊断的字段）。本版按最终结论重新组织，**行为不变**，实测已通过的效果全部保留。
+- 文件头重写为三层根因的完整说明，按确认流程命中的顺序排列：兜底朝向 → 指针改写 → 重复确认。
+- 新增 `currentMode()` / `currentTargetObject()` 两个小工具，消除各处重复的 `ISMoveableCursor.mode[self.player]` 与对象取值写法。
+- `advanceFacing()` 里的 `objectIndex` 同步保留并加注说明：它只覆盖「旋转后到第一次 create 之间」的窗口，之后的窗口由 `_gqsFacing` 负责。删掉它会引入预览闪烁，因此不移除。
+- 确认日志精简：去掉 `joypad` 字段（该字段在旋转模式下恒为 nil，无参考价值），保留 `cursor` / `objIdx` / `facing` / `reverse`。
+- **补强 `place`（放置）模式**：重复 `create` 的方向恢复原先只对 `rotate` 模式生效，放置模式仍会被第二次调用拉回原朝向。本版把恢复逻辑扩展到 `place`，但只写 `cursorFacing`——该模式下 `objectIndex` 表示背包物品索引，写入会选错物品。
+- `furnitureRotate` 日志分类改为默认关闭（实测已通过，需要排查时再打开）。
+
+保持不变
+- 三层修复逻辑本身未改动：跳过兜底朝向、手柄期间忽略指针旋转、重复确认时恢复方向、`ISMoveablesAction` 层按光标索引兜底。
+- 人体模型（`canRotateDirection()`）仍走原版路径。
+- 未修改任何原版文件；全部为运行时方法包装。
+
+验证说明
+- 基于 v1.5.1.38 修改，修改 3 个文件。
+- 已静态检查：31 个 Lua 通过 Lua 5.1 语法编译、UTF-8 无 BOM、版本号一致、Full/OnlyPatch 对应文件、ZIP CRC。
+- 本版为整理性质，`rotate` 模式行为与 v1.5.1.38 一致；`place` 模式为新增保护，建议顺带验证一次。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSFurnitureRotateFix.lua`
+- `42/media/lua/client/GQSDebugLog.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.38（修复 clearCache 重置朝向导致方向回退）
+
+修复：手柄转到目标方向后按 A 仍变回原方向（第五层）
+- v1.5.1.37 让 `objectIndex` 与 `cursorFacing` 同步，实测日志确认第一次 `create` 已正确（`objIdx` 会跟着光标变成 1/2/3/4），但第二次 `create` 的 `objIdx` 又回到 3。
+- 原因：`ISMoveableCursor:clearCache()` 里有一句
+  `if ISMoveableCursor.mode[self.player] == "rotate" then self.objectIndex = -1; end`
+  而 `ISMoveablesAction:perform()` 每次动作完成都会调用 `clearCacheForAllPlayers()`。于是第一次旋转一完成，`objectIndex` 就被重置为 `-1`；第二次 `create` 时 `isValid()` 用 `objectIndex < 1` 分支重新取 `getFaceIndex()`，拿到的又是家具**原始朝向**（3 = S）。
+- 因为 `objectIndex` 会被原版主动清掉，**不能把它当作方向的存储位置**。
+- 修复：改用模组自有字段保存玩家选择：
+  - 旋转成功时记录 `_gqsFacing`（朝向索引）与 `_gqsFacingObj`（目标对象引用）；
+  - 第一次 `create` 执行后置 `_gqsPendingRestore`；
+  - 后续重复 `create` 若发现 `cursorFacing` 已被清空、且目标仍是同一件家具，就把 `_gqsFacing` 重新写回 `cursorFacing` 与 `objectIndex`。
+- 对象引用校验保证换到别的家具后不会误用旧方向；`_gqsPendingRestore` 保证「进入旋转模式后不转直接按 A」不会被上一次的选择污染。
+- 配合 v1.5.1.35 的 `ISMoveablesAction.new` 包装，即使第二次 `create` 时 `currentMoveProps` 仍是旧朝向，动作层也会用正确的方向执行。
+- 未修改任何原版文件；全部为运行时方法包装。
+
+验证说明
+- 基于 v1.5.1.37 修改，修改 3 个文件。
+- 已静态检查：31 个 Lua 通过 Lua 5.1 语法编译、UTF-8 无 BOM、版本号一致、Full/OnlyPatch 对应文件、ZIP CRC。
+- 实测日志依据：`f:987 confirm cursor= 4 objIdx= 4 facing= E` 后紧跟 `f:995 confirm cursor= nil objIdx= 3 facing= S`，两次调用之间 `objectIndex` 由 4 变为 3。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSFurnitureRotateFix.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.37（修复确认键重复执行导致方向被回退）
+
+修复：手柄转到目标方向后按 A 仍变回原方向（第四层）
+- v1.5.1.36 已成功屏蔽鼠标指针改写朝向，实测日志出现 `mouse rotate ignored (joypad active), keeping N`，说明那一层已修好。
+- 新日志暴露出真正致命的一环：**一次按 A，`ISMoveableCursor:create()` 会被调用两次**：
+  ```
+  confirm cursor= 1  objIdx= 3  facing= N   ← 第一次，方向正确
+  confirm cursor= nil objIdx= 3  facing= S   ← 第二次，方向回退成原朝向
+  ```
+- 原因：原版 `create()` 在结尾会把 `cursorFacing` 和 `joypadFacing` 都清空：
+  `self.cursorFacing = nil; self.joypadFacing = nil;`
+  第二次调用时 `cursorFacing` 已是 `nil`，`isValid()` 里的 `local faceIndex = self.cursorFacing or self.objectIndex` 就回退到 `objectIndex`——而这个值仍是家具**原始朝向**的索引（3 = S）。于是第二次执行把第一次转好的方向又转了回去。
+- 为什么第一次能对、第二次会错：两版修复都只写了 `cursorFacing`，没有同步 `objectIndex`。原版自己的手柄旋转路径（`rotateKey`）恰恰是靠 `objectIndex = objectIndex + 1` 来推进朝向的，`cursorFacing` 只是鼠标路径的补充。
+- 修复：手柄旋转成功时**同时写入 `objectIndex`**（仅 `rotate` 模式，此时它表示朝向索引 1~4；`place`/`pickup` 等模式该字段表示对象索引，不动）。这样即使 `cursorFacing` 被清空，回退值也是玩家选的方向，两次 `create` 结果一致。
+- 未修改任何原版文件；全部为运行时方法包装。
+
+验证说明
+- 基于 v1.5.1.36 修改，修改 3 个文件。
+- 已静态检查：31 个 Lua 通过 Lua 5.1 语法编译、UTF-8 无 BOM、版本号一致、Full/OnlyPatch 对应文件、ZIP CRC。
+- 实测日志依据：同一帧 `f:5182` 先输出 `mouse rotate ignored ... keeping N` 与 `confirm cursor= 1 ... facing= N`，8 帧后 `f:5190` 又输出 `confirm cursor= nil ... facing= S`。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSFurnitureRotateFix.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.36（修复鼠标位置覆盖手柄旋转方向）
+
+修复：手柄转到目标方向后按 A 仍变回原方向（真正原因）
+- 前两版（v1.5.1.34 / v1.5.1.35）分别处理了「光标停在顶替朝向」和「反查贴图名失败」，但实测日志显示确认时光标索引总是被改写成 `3`（S），说明方向在按 A 的瞬间被**第三方**覆盖了。
+- 真正原因：`ISBuildingObject.lua` 的 `DoTileBuilding()` 在**按住放置键期间每帧**调用 `draggingItem:rotateMouse(x, y)`：
+  `if playerObj:isBuildButtonDown() then draggingItem:rotateMouse(x, y) end`
+  而 `ISMoveableCursor:rotateMouse()` 完全按**鼠标指针相对光标中心的位置**重设朝向：
+  指针在南侧 → `setCursorFacing(3)`、北侧 → `1`、西侧 → `2`、东侧 → `4`。
+- 手柄玩家从不移动鼠标，指针一直停在屏幕某处（通常是光标下方），于是每次按 A 确认的瞬间，`cursorFacing` 都被强制改成 `3`（S，往往正是家具的原朝向），家具自然「转完又变回原样」。
+- 这也解释了为什么症状是「偶发」：是否出错取决于指针恰好停在光标中心的哪个方向，以及是否落在中心半径内（半径内则清空朝向）。
+- 修复：包装 `ISMoveableCursor.rotateMouse`，**手柄操作期间直接忽略鼠标旋转**，不改写 `cursorFacing`；鼠标操作时保持原有行为（含同轴吸附）。
+- 判定方式双重保险：
+  - 手柄最近 4 秒内旋转过方向 → 判定为手柄操作；
+  - 否则回退到原版 `wasMouseActiveMoreRecentlyThanJoypad()` 判断。
+- 诊断增强：确认日志增加 `joypad` / `objIdx` 字段；鼠标旋转被忽略时输出一行 `mouse rotate ignored (joypad active)`。
+- 未修改任何原版文件；全部为运行时方法包装。
+
+验证说明
+- 基于 v1.5.1.35 修改，修改 3 个文件。
+- 已静态检查：31 个 Lua 通过 Lua 5.1 语法编译、UTF-8 无 BOM、版本号一致、Full/OnlyPatch 对应文件、ZIP CRC。
+- 实测日志依据：连续三次 RB 依次输出 `W → S → E`，说明循环正确；紧接着按 A 的确认日志却是 `cursor= 3 facing= S`，方向在确认瞬间被改写。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSFurnitureRotateFix.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.35（修复四方向家具确认后仍回到原方向）
+
+修复：四方向家具转到目标方向后按 A 仍偶发变回原方向
+- 上一版（v1.5.1.34）解决了「旋转光标停在自身朝向顶替项」的问题，但四方向家具（例如椅子）确认后仍偶发回弹，本版补上最后一环。
+- 根因：原版 `ISMoveableCursor:create` 用**反查贴图名**的方式确定目标朝向：
+  `local direction = currentMoveProps:getFaceDirectionFromSpriteName(currentMoveProps.sprite:getName())`
+  而这个函数要求该贴图带有 `Facing` 图块属性：
+  `s.facing = props:has("Facing") and props:get("Facing") or nil`
+  目标朝向的贴图一旦缺少 `Facing` 属性（模组家具尤其常见），反查就返回 `nil`。
+- 后果：`ISMoveablesAction` 里 `if faces[direction]` 因 `direction == nil` 不成立，直接沿用原朝向的 props，家具被放回原方向。预览显示的是新方向，落地却是旧方向，所以表现为「偶发、看运气」。
+- 修复：新增对 `ISMoveablesAction.new` 的包装，**直接用玩家看到的光标索引**（`cursorFacing` / `joypadFacing`，1~4 对应 N/W/S/E）确定方向，不再依赖从贴图名反查；并且只在该朝向确实存在贴图时才覆盖，避免指向不存在的方向。
+- 覆盖范围：`place`（放置）与 `rotate`（旋转）两种模式都生效；`rotate` 模式用世界对象的贴图判断，`place` 模式用背包物品的贴图判断。
+- 诊断增强：确认时输出一行日志，包含光标索引、目标贴图 `facing` 字段、以及原版反查结果，便于核对是否是 `Facing` 属性缺失导致的。
+- 未修改任何原版文件；全部为运行时方法包装。
+
+验证说明
+- 基于 v1.5.1.34 修改，修改 3 个文件。
+- 已静态检查：31 个 Lua 通过 Lua 5.1 语法编译、UTF-8 无 BOM、版本号一致、Full/OnlyPatch 对应文件、ZIP CRC。
+- 上一版实测日志显示旋转循环正常（E/N/W/S 均出现），问题只出在按 A 的确认环节，与本版定位一致。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSFurnitureRotateFix.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.34（修复家具旋转「转了又变回原方向」）
+
+修复：家具旋转后按 A 仍回到原方向
+- 新增 `42/media/lua/client/GQSFurnitureRotateFix.lua`，客户端修正原版家具旋转的朝向循环。
+- 根因在原版 `ISMoveableSpriteProps:getIndexedFaces()`：它固定返回 4 个朝向，缺哪个方向就用家具**自身当前朝向**顶替：
+  `d[1]=N或S或自身`、`d[2]=W或E或自身`、`d[3]=S或N或自身`、`d[4]=E或W或自身`。
+  而旋转光标 `cursorFacing` / `joypadFacing` 是在 1~4 上直接循环的，于是只有 N/S 贴图的家具在索引 2 和 4 上都会落回自身贴图。
+- 后果一：预览看起来「没转」，玩家以为按键没生效。
+- 后果二：按 A 确认时，方向是从「当前贴图名」反推的，落回自身贴图就等于反推出原方向，家具被放回原来的朝向。这就是「旋转后按 A 又变回原样」。
+- 后果三：`cannotCreate()` 里还有一句 `currentMoveProps.spriteName == origMoveProps.spriteName` 就拒绝执行，光标停在顶替项时按 A 会完全没反应。
+- 修复方式：让旋转只在**真实存在贴图的朝向**之间循环，跳过所有顶替项；只有一个朝向的家具保持原版行为不变；人体模型（`canRotateDirection()`）走原版路径不受影响。
+- 覆盖三条输入路径：
+  - 手柄 X（放置模式下旋转）→ 包装 `ISMoveableCursor.rotateWhilePlacing`
+  - 手柄 RB（旋转模式下旋转）→ 包装 `ISMoveableCursor.rotateKey`
+  - 鼠标拖拽旋转 → 包装 `ISMoveableCursor.rotateMouse`，缺失方向吸附到同轴的另一侧（N↔S、W↔E），不再无声失败
+- 额外保险：包装 `ISMoveableCursor.create`，确认前若光标仍停在顶替项（例如放置模式进场时 `snapFaceToSquare()` 自动选的朝向），先校正到同轴真实朝向，避免 A 键完全无响应。
+- 未修改任何原版文件；全部为运行时方法包装，可随模组移除即时还原。
+- 新增日志分类 `furnitureRotate`（默认开启，便于本次实测核对，验证通过后改为 false）。
+
+验证说明
+- 基于 v1.5.1.33 Full 修改，新增 1 个 Lua 文件，修改 2 个。
+- 已静态检查：31 个 Lua 通过 Lua 5.1 语法编译、UTF-8 无 BOM、版本号一致、Full/OnlyPatch 对应文件、ZIP CRC。
+- 尚未在游戏内实测；需要确认两点：① 只有 N/S 朝向的家具（床、柜子）转 2 次能回到原方向且中间确实转过；② 人体模型旋转未受影响。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSDebugLog.lua`
+- `42/media/lua/client/GQSFurnitureRotateFix.lua`（新增）
+
+v1.5.1.33（按住 Y 时在侧栏图标旁显示方向键提示）
+
+新增：按住 Y 的侧栏方向提示（方案 2）
+- 新增 `42/media/lua/client/GQSYHoldSidebarHints.lua`。按住 Y 期间，左侧面板图标右侧显示对应的方向键图标；松开 Y 立即消失，不占用常驻屏幕空间。
+- 图标与动作对应：健康图标 ← `health` / `playerInfo`；物品栏图标 ← `inventory`；建造图标 ← `building`；合成图标 ← `crafting`。健身面板在侧栏没有图标，因此不显示提示。
+- 同一图标对应两个方向时（例如把「上=健康」「下=玩家信息」都设置了），两个箭头在该图标右侧**同一行并排**显示，中间留有小间距，不上下堆叠、不互相挤压。
+- 方向完全读取 Mod 设置中的 `yShortcutUp/Down/Left/Right`，改完映射后下次按住 Y 即生效。
+- 箭头大小按当前侧栏尺寸等比缩放（约为图标高度的 0.8 倍），位置读取运行时 `ISButton` 控件坐标，分辨率、UI 缩放、分屏自动跟随，无硬编码像素。
+- 在 `GQSPanelQuickSelect.lua` 末尾新增只读接口 `isYShortcutHintActive(playerNum)`。提示直接复用现有 Y 手势状态机，因此教程模式、世界地图焦点、总开关关闭、方向已被消耗等场景自动一致，不重复实现判断逻辑。
+
+保持不变
+- 未修改任何侧栏按钮、图标贴图或点击处理；未修改 Y 手势与快捷键执行逻辑。
+- Select 轮盘提示（v1.5.1.32）与左下角 RT+B 提示未改动。
+
+验证说明
+- 基于 v1.5.1.32 Full 修改，新增 1 个 Lua 文件，修改 1 个。
+- 已静态检查：30 个 Lua 通过 Lua 5.1 语法编译、UTF-8 无 BOM、版本号一致、Full/OnlyPatch 对应文件、ZIP CRC。
+- 尚未在游戏内实测；需要确认箭头相对图标的位置与缩放比例，以及较大侧栏尺寸下箭头是否被面板边界裁切。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSYHoldSidebarHints.lua`（新增）
+- `42/media/lua/client/GQSPanelQuickSelect.lua`（新增只读接口）
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.32（Select 轮盘内显示 Y+方向 快捷面板提示）
+
+新增：Select 轮盘的面板切片显示 Y 快捷键
+- 新增 `42/media/lua/client/GQSYShortcutWheelHints.lua`。打开 Select 轮盘（Back/Select 键）并选中「建造」「合成」「玩家信息」切片时，在切片文字的第二行显示 `Y + 方向键` 的原生图标提示。
+- 采用与缩放快捷键提示（`GQSZoomRadialShortcutHints.lua`）完全相同的实现方式：包装 `ISBackButtonWheel.addCommands`，对目标切片调用 `setSliceText` 追加换行以预留第二行，再由一个透明置顶覆盖层绘制原生 `Joypad.Texture` 图标。不改动轮盘命令、输入处理或原版 Lua。
+- 提示内容随 Mod 设置动态变化：每次打开轮盘都会重新读取 `yShortcutUp/Down/Left/Right`，玩家改映射后立即生效；同一动作被映射到多个方向时用 `/` 并列显示；`yShortcutEnabled` 或主开关 `yEnhancementEnabled` 关闭时不显示提示。
+- 「健康」并入「玩家信息」切片显示（健康是玩家信息窗口的子页签），因此默认配置下 上=健康 会显示在玩家信息切片上。「物品栏」与「健身」在轮盘中无对应切片，故不显示提示。
+- 图标尺寸 32px、间距 4px、`+` 与 `/` 分隔符、第二行垂直偏移均与缩放提示保持一致。
+
+保持不变
+- 轮盘的切片顺序、命令、选中逻辑、暂停状态下的行为均未改动。
+- 左下角 RT+B 提示（`GQSWorldFocusShortcutHints.lua`）与 Moodle 提示未改动。
+- 未新增任何常驻屏幕元素：提示只在轮盘打开且选中对应切片时出现。
+
+验证说明
+- 基于 v1.5.1.31 Full 修改，新增 1 个 Lua 文件，`mod.info` 与更新日志同步。
+- 已静态检查：29 个 Lua 通过 Lua 5.1 语法编译、UTF-8 无 BOM、版本号一致、Full/OnlyPatch 对应文件、ZIP CRC。
+- 尚未在游戏内实测；需要确认第二行图标与切片文字的相对位置，以及切换切片时的跟随是否正确。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSYShortcutWheelHints.lua`（新增）
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.31（RT+B 文案精简 + 提示行紧贴原版 Y 行）
+
+世界焦点快捷键提示
+- 文案由「聚焦玩家 / 关闭所有面板」（11 字）改为「退关面板」（4 字），英文同步由 `Focus player / close all panels` 改为 `Close panels`。同步修改 CN/EN 的 `UI.json`、`UI_CN.txt`、`UI_EN.txt` 以及 Lua 内的 fallback 文本。
+- 修复 RT+B 提示行与下方原版 Y「容器」之间多出一整行空白的问题。原逻辑把起始槽位固定为 2（`y1-64`），即预先为原版 LB 提示保留了 `y1-32` 这一格；而实际游戏中 `lbPrompt` 为 nil 时该格是空的，于是 Y 行上方出现 32px 空隙。
+- 现在改为占用「Y 行上方最低的未占用槽位」：无 LB 时取 `y1-32`，有 LB 时取 `y1-64`；若此时正在拖拽可移动物品（原版拖拽图标固定在 `y1-64`），再顺延到 `y1-96`，避免与原版图标重叠。
+
+保持不变
+- RT+B 图标尺寸、图标与文字间距、文字垂直居中公式（v1.5.1.30 已验证的 `(32 - 字体行高) / 2`）、`rtBFocusEnabled` 开关、RT+B 实际输入行为均未改动。
+- 原版 Y「容器」、X「交互」提示逻辑与 Moodle 提示参数未改动。
+
+验证说明
+- 基于 v1.5.1.30 Full 修改。
+- 已静态检查：28 个 Lua 通过 Lua 5.1 语法编译、UTF-8 无 BOM、`mod.info` / Lua `VERSION` / 更新日志版本号一致、CN/EN 四份翻译文件同步、Full/OnlyPatch 对应文件、ZIP CRC。
+- 文案与槽位调整尚未在游戏内实测；v1.5.1.30 的文字垂直居中已由用户实测确认。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `42/media/lua/shared/Translate/CN/UI.json`
+- `42/media/lua/shared/Translate/CN/UI_CN.txt`
+- `42/media/lua/shared/Translate/EN/UI.json`
+- `42/media/lua/shared/Translate/EN/UI_EN.txt`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.30（按原版公式重算 RT+B 提示文字的垂直居中）
+
+世界焦点快捷键提示
+- 改用原版 `ISButtonPrompt` 的同一套公式计算文字垂直位置：行高固定为 32px，文字按自身字体行高居中，即 `y + (32 - 字体行高) / 2`。
+- 中文字体 `UIFont.NewLarge` 对应 `zomboidLargeChinese.fnt`，其 `lineHeight = 26`，因此文字相对行顶的偏移应为 **+3px**。
+- v1.5.1.29 采用 `lineHeight = max(28, 字体行高 + 6) = 32` 并把图标与文字一起按 `(32 - 32) / 2` 计算，结果两者偏移都是 0，文字比原版**高 3px**；v1.5.1.28 及更早的 20px 居中则是 +6，比原版**低 3px**。两版都没有落在原版的 +3px 上。
+- 现在图标偏移固定为 0（原版按钮图标为 32px，`(32 - 32) / 2 = 0`），文字偏移按实测字体行高计算，两者都与原版 Y「容器」、X「交互」提示一致。
+- 不再使用"字体行高 + 6"派生行高，消除此前的经验性偏移量。
+
+保持不变
+- RT+B 图标尺寸、RT 与 B 之间的横向间距、文字横向间距、提示行所在槽位、`rtBFocusEnabled` 功能开关、RT+B 实际输入行为均未改动。
+- 原版 Y「容器」、X「交互」提示逻辑、Moodle 提示的 `MOODLE_HINT_OFFSET_X = 16` 与 `MOODLE_HINT_DURATION_MS = 5000` 未改动。
+
+验证说明
+- 基于 v1.5.1.29 Full 修改，只调整 `GQSWorldFocusShortcutHints.lua` 的文字/图标垂直偏移计算与内部变量命名，并更新版本号与更新日志。
+- 已静态检查：全部 28 个 Lua 文件通过 **Lua 5.1 语法编译**（使用与游戏一致的 Lua 5.1 运行时，此前的版本因环境缺少 Lua 编译器未执行该项）、UTF-8 无 BOM、`mod.info` 与 Lua `VERSION` 版本号一致、Full/OnlyPatch 对应文件、ZIP CRC。
+- **尚未在 Project Zomboid Build 42.21.0 游戏内实测**；安装后请把 RT+B 文字与原版 Y、X 提示对比，确认三者基线一致。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.29（修正 RT+B 世界焦点提示的垂直对齐）
+
+世界焦点快捷键提示
+- 修正 `GQSWorldFocusShortcutHints.lua` 中文字与控制器图标采用不同垂直居中高度的问题。文字绘制起点现在使用与 32px 原生按钮图标相同的行内定位基准，避免“聚焦玩家 / 关闭所有面板”文字明显偏下。
+- 保持图标尺寸、RT 与 B 图标之间的横向间距、文字横向间距、提示行位置、`rtBFocusEnabled` 功能开关以及 RT+B 实际输入行为不变。
+- 不修改原版 Y「容器」、X「交互」提示或其他提示逻辑。
+
+验证说明
+- 基于 v1.5.1.28 Full 修改；只对提示文字的垂直偏移公式做功能性调整，并更新 Lua/Mod 版本号与更新日志。
+- 已静态检查 UTF-8 无 BOM、保留用户自定义 `MOODLE_HINT_OFFSET_X = 16` 与 `MOODLE_HINT_DURATION_MS = 5000`、Full/OnlyPatch 对应文件、ZIP CRC 和差异文件清单。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内实测；安装后请确认 RT+B 图标和中文文字与原版提示的视觉对齐。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.28（修复特质信息面板的无效模块加载尝试）
+
+特质信息面板加载
+- 删除对不存在的根路径 `ISToolTip` 的多余 require 尝试。该调用虽然被 pcall 捕获，但当前游戏日志仍会记录 `require("ISToolTip") failed` 警告。
+- 保留正确的 `ISUI/ISToolTip` 加载路径；不改特质选择、提示框内容、按键处理和面板布局逻辑。
+- 此改动针对 1.5.1.1 与 1.5.1.2 的关键差异之一；预期可消除这条无效 require 警告。红色模组错误标记是否因此消失仍需游戏内复测。
+
+验证说明
+- 已与 v1.5.1.27 Full 中的当前文件核对，确认仅移除无效模块路径尝试并保留有效路径。
+- 已静态检查 UTF-8 无 BOM、版本号、Full/OnlyPatch 对应文件和 ZIP CRC。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内实测。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSTraitInfoPanel.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.27（恢复快捷键提示并加强旧配置兼容）
+
+缩放轮盘快捷键图标
+- 将缩放快捷键图标从 ISBackButtonWheel 自身的原生 RadialMenu 渲染层移到独立透明置顶 UI 覆盖层，避免提示图标被原生轮盘的绘制顺序覆盖。
+- 修复覆盖层生命周期判断：不再用 isReallyVisible() 误判 UIManager 注册状态；显示前显式设为可见、置顶并注册到 UIManager，关闭轮盘时隐藏/移除，重开时重新注册。
+- 覆盖层跟随每个玩家当前 Select/Back 轮盘的位置和尺寸；仅当选中 ZoomMinus/ZoomPlus 且该动作存在已配置快捷键时绘制 RB 与对应按钮/方向图标。
+- 原版切片第一行继续显示缩放百分比；不修改 ZoomMinus/ZoomPlus 的原版命令或执行逻辑。
+
+RB 设置与情绪提示兼容
+- 加强 RB 方向选项迁移：旧 Up/Down 索引 4/5 转为当前“上一个/下一个状态”；旧 Left/Right 索引 4/5（已移除的情绪动作）转为该方向的默认缩放动作，而不是意外变成“不使用”。有效的 1–3 自定义值不覆盖。
+- GQSRBZoom 的实际输入、世界焦点情绪提示和缩放轮盘提示改为共用当前动作解析；即使旧保存值暂时未被 Mod Options 归一化，显示与实际映射也保持一致。
+- 左下角不恢复 RB+左右常驻缩放提示；RB+上/下情绪提示仍按原来的情绪新增/等级上升触发及毫秒时长显示。保留用户设置 `MOODLE_HINT_OFFSET_X = 16`、`MOODLE_HINT_DURATION_MS = 5000`。
+- 不修改 CustomGamepadUI Workshop 文件，不移除 GQSRBZoom 的旧共享 API。
+
+验证说明
+- 静态检查 Lua 语法、UTF-8 无 BOM、Mod Options 值归一化逻辑、共享按键解析、版本号、Full/OnlyPatch 对应文件和 ZIP CRC。
+- 隔离测试覆盖旧五选项索引迁移、Up/Down 情绪动作兼容、Left/Right 旧情绪动作恢复为方向默认缩放、轮盘图标来源与当前动作一致。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内实测。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSModOptions.lua`
+- `42/media/lua/client/GQSRBZoom.lua`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `42/media/lua/client/GQSZoomRadialShortcutHints.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.26（缩放轮盘改用原生按键图标提示，并按用途限制方向键选项）
+
+Select/Back 缩放轮盘快捷键提示
+- 选中原版 ZoomMinus / ZoomPlus 切片时，第一行保留原版本地化缩放百分比，第二行绘制实际配置的原生手柄图标，不再将 RB+A/Y 或方向键拼成文本。
+- 图标行实时读取 RB+Y、RB+A、RB+左、RB+右的 Mod Options 映射；只显示当前确实映射到该缩放动作的按键，多个按键以小型分隔符显示。
+- 移除左下角常驻的 RB+方向键缩放提示，避免和缩放轮盘选中项重复；RT+B 提示保持原位置。
+- 不改变原版 ZoomMinus / ZoomPlus 命令、实际缩放输入、情绪提示显示时长/位置或 CustomGamepadUI Workshop 文件。
+
+RB 方向键设置精简
+- RB+上/下在 Mod Options 中仅提供“不使用 / 上一个状态 / 下一个状态”。
+- RB+左/右仅提供“不使用 / 放大视角 / 缩小视角”。RB+Y/A 继续提供“不使用 / 放大视角 / 缩小视角”。
+- GQSRBZoom 的旧动作表与共享 getAction 接口保留，通过方向专属映射读取新选项值；兼容迁移旧的 4/5 项设置值。
+- 保留用户手动设定的情绪提示常量 `MOODLE_HINT_OFFSET_X = 16` 与 `MOODLE_HINT_DURATION_MS = 5000`。
+
+验证说明
+- 静态检查 Lua 语法、UTF-8 无 BOM、翻译 JSON、配置选项集合、版本号和 ZIP CRC。
+- 隔离测试覆盖方向专属映射、轮盘切片按配置收集原生图标、移除常驻缩放行和情绪提示常量保留。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内实测。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSModOptions.lua`
+- `42/media/lua/client/GQSRBZoom.lua`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `42/media/lua/client/GQSZoomRadialShortcutHints.lua`
+- `42/media/lua/shared/Translate/CN/UI.json`
+- `42/media/lua/shared/Translate/CN/UI_CN.txt`
+- `42/media/lua/shared/Translate/EN/UI.json`
+- `42/media/lua/shared/Translate/EN/UI_EN.txt`
+
+v1.5.1.25（Select 缩放轮盘的 RB 按键提示改为情境式显示）
+
+缩放快捷键提示
+- 在原版 Select / Back 按钮轮盘的缩放切片中心标签中，追加当前配置的 RB 按钮快捷键。
+- 默认缩放到 75% 的 ZoomMinus 切片显示“原版缩放标签 | RB+A”；缩放到 125% 的 ZoomPlus 切片显示“原版缩放标签 | RB+Y”。
+- 标签按 Mod Options 中 rbButtonAAction、rbButtonYAction 的实时映射生成；如果交换动作或设为“不使用”，提示随实际配置变化或隐藏。
+- 将常驻左下角的缩放提示精简为当前配置的 D-pad 缩放方向；RB+A / RB+Y 改为仅在 Select 缩放轮盘中显示，减少屏幕常驻提示拥挤。
+- 同步保留用户调整的情绪快捷提示参数：MOODLE_HINT_OFFSET_X=16、MOODLE_HINT_DURATION_MS=5000。没有改动情绪提示的其他逻辑。
+- 不改变原版 ZoomMinus / ZoomPlus 回调、不修改实际缩放行为，也不修改 CustomGamepadUI Workshop 文件。
+
+验证说明
+- 静态检查 Lua 语法、UTF-8 无 BOM、Mod Options 动态映射、版本号、ZIP CRC 与 Full/OnlyPatch 对应文件一致性。
+- 隔离测试覆盖默认 RB+A / RB+Y 标签、交换按钮动作、禁用单个按钮以及关闭 RB 扩展时不添加提示。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内实测。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `42/media/lua/client/GQSZoomRadialShortcutHints.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.24（情绪快捷键提示时长改为毫秒计时）
+
+情绪快捷键提示
+- 将 RB+情绪方向合并图标的提示计时从 OnTick 累计帧数改为游戏毫秒时钟 `getTimestampMs()`。
+- 提示默认持续 3000 ms（3 秒），不再因玩家帧率高低而显著改变显示时长。
+- 当目标环境无法使用 `getTimestampMs()` 时，以 `os.time()` 毫秒换算作为备用计时；该备用时钟精度较粗，但不依赖帧数。
+- 保持情绪新增/等级上升触发、提示隐藏时机、分屏定位、按键动态映射、32×32 合并图标及实际按键逻辑不变。
+
+验证说明
+- 静态检查 Lua 语法、UTF-8 无 BOM、版本号、ZIP CRC 与 Full/OnlyPatch 对应文件一致性。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内实测。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.23（延长情绪快捷键提示并向左调整位置）
+
+情绪快捷键提示
+- 将 RB+情绪方向合并图标的显示时间从约 1.5 秒延长到约 3 秒。
+- 将提示整体向左移动 40 像素，减少其贴近屏幕右边缘的观感。
+- X 坐标按每位玩家自己的屏幕区域进行限制，分屏时不会跨出对应 viewport；窄分屏区域会优先保证提示留在屏幕内。
+- 保留 v1.5.1.22 的原生图标、情绪新增/等级上升触发、超时隐藏和方向键动态映射；不改输入处理。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.22（修复情绪上下合并提示未显示及绘制尺寸）
+
+情绪快捷键提示
+- 修复读档后已存在情绪图标时，初始状态被静默当作基准、导致没有首次提示的问题：首次有效世界焦点检测到已有情绪图标时，短暂显示一次组合按键提示。
+- 后续仍只在情绪图标新增或情绪等级上升时显示约 1.5 秒；情绪等级下降不触发，提示不常驻显示。
+- 修正合并方向图标尺寸：合成资源是 32×32 单张图，现在按单图尺寸绘制，不再被拉伸成 28×64。
+- 将合成 PNG 从灰度+透明度格式转换为 RGBA；每个像素的灰度值和 Alpha 保持一致，仅改变 PNG 通道表示方式，以提高游戏纹理加载兼容性。
+- 保持 RB 原生图标、情绪堆栈锚点、分屏定位、动态按键映射与实际按键处理不变。
+
+验证说明
+- 静态检查：Lua 语法、UTF-8 无 BOM、PNG 尺寸/模式/Alpha、版本号、ZIP CRC 与 Full/OnlyPatch 文件一致性。
+- 隔离逻辑检查：首次已有情绪提示一次、已初始化后不常驻、新情绪/等级上升可触发、等级下降不触发、菜单焦点期间隐藏且返回世界焦点不重复播放初始提示。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内实测。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `42/media/ui/icon_gqs_dpad_up_down.png`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.21（使用官方原始上下方向图标精确合成提示图）
+
+情绪上下方向合并图标
+- 根据用户提供的官方原始 `XBOX_DPad_Up.png` 与 `XBOX_DPad_Down.png`，在原始 32×32 像素尺寸上进行像素级拼接，生成单张 `42/media/ui/icon_gqs_dpad_up_down.png`。
+- 合成方式：保留 Up 原图的上半部分（y=0–15），保留 Down 原图的下半部分（y=16–31）；两张源图在中间接合区域的像素一致，因此不需要缩放、重绘、调色或新增边框。输出保留源图 LA（灰度+透明度）模式与原始透明像素。
+- 只替换 v1.5.1.20 中已经使用的合并图资源，维持原有单张图片绘制方式、RB 原生图标、显示/隐藏时机、情绪变化触发、分屏锚点与按键动态映射；未修改 Lua 逻辑。
+- 不修改 Project Zomboid、CustomGamepadUI Workshop 或 CleanUI 的文件。
+
+验证说明
+- 已核对两张源图尺寸与色彩模式一致；逐像素断言确认输出上半部分与 Up 原图完全一致、下半部分与 Down 原图完全一致。
+- 已验证新图片透明通道保留，ZIP CRC 与 Full/OnlyPatch 对应文件一致性检查待打包后执行。
+- 未在 Project Zomboid Build 42.21.0 游戏内实测。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/ui/icon_gqs_dpad_up_down.png`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.20（情绪上下方向提示合并为单张图标）
+
+情绪快捷键合并图标
+- 将情绪上下方向提示从分别绘制 D-pad 上、下两张纹理，改为使用单张合并图标 `42/media/ui/icon_gqs_dpad_up_down.png`；RB 图标仍使用原生 `Joypad.Texture.RBumper`，只替换方向提示部分。
+- 组合图以一个统一的竖向按键符号表示“上/下”，显示高度继续占用原先两张 32px 方向图标的总高度，并按新的图像宽度调整整体居中，不再显示两个独立的按键外框。
+- 当 Mod Options 将情绪操作映射为左/右时，仍然显示原生左、右方向图标；本次只把上下组合替换为单张图像。情绪变化触发、短暂显示、消失时机、分屏锚点与 RB 实际操作均不改变。
+- 新增独立图片资源，不修改 Project Zomboid 或 CustomGamepadUI 的原始文件。
+- 说明：当前模组包只包含运行时 `Joypad.Texture` 图标 getter，并未包含官方 D-pad 上/下的原始 PNG，因此新增图是统一风格的独立合并图，并非官方原图逐像素合并；若需原像素拼接，应提供原始图片后替换资源。
+
+验证说明
+- 完成 Lua 语法、UTF-8 无 BOM、版本号、资源存在性、ZIP CRC 与 Full/OnlyPatch 对应文件一致性检查。
+- 通过静态绘制分支检查，确认垂直情绪映射使用一个合并图像纹理和一次绘制调用；加载失败时保留原有安全备用路径。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内实测；需确认合并图标实际外观、清晰度及与 RB 原生图标的视觉匹配。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `42/media/ui/icon_gqs_dpad_up_down.png`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.19（情绪快捷键提示按情绪变化短暂显示）
+
+情绪快捷键提示
+- 不再让 RB 情绪快捷键提示常驻显示；通过只读 Moodle 状态快照检测到新情绪图标出现或已有情绪等级上升时，才显示约 1.5 秒，随后自动隐藏。情绪等级下降不会触发提示。
+- 将提示移到当前玩家情绪图标堆栈下方，并与最底部图标留出更明显间距；R3/分屏情况下仍使用各自 viewport 的情绪图标位置。
+- 按键图标改用 32px 原生提示尺寸。公开可查的游戏控制器素材中未找到原生“十字键上+下”合并图标，因此由原生 RB、D-pad 上/下纹理组合成一个提示组；如果玩家把情绪切换改到左/右，则根据 Mod Options 动态组合显示对应方向。其他非相反方向组合会按独立原生方向图标显示。
+- 只调整提示的显示时机、大小与位置，不改变 RB+D-pad 的实际动作、情绪切换、缩放或 RT+B 操作；左下角的缩放与 RT+B 提示维持原位。
+
+验证说明
+- 完成 Lua 语法、编码/版本号、翻译 JSON、ZIP 完整性和 Full/OnlyPatch 对应文件一致性检查；静态模拟覆盖新增/升级触发、等级下降不触发、动态左右映射及提示自动超时。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内实测。需确认情绪图标新增/升级时提示能跟随动画出现，并确认单人/分屏显示不遮挡 HUD。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSRBZoom_Moodles.lua`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.18（将情绪快捷键提示移到情绪图标附近）
+
+世界焦点快捷键提示
+- 从左下角快捷键列表中移除“切换情绪信息”文字行；左下角的“缩放视角”与“RT+B 聚焦玩家/关闭所有面板”提示保留原本的垂直槽位，不因移除情绪行而挤动。
+- 在每个玩家当前情绪图标堆栈的最上方显示小型原生 `RB + 方向键` 图标，在最下方显示对应的小型 `RB + 方向键` 图标，不额外绘制说明文字。
+- 提示按照 Mod Options 的实时动作映射区分“上一个情绪”和“下一个情绪”：默认分别显示 RB+上、RB+下；如果将左/右改为切换情绪，则提示会跟随映射移动到上/下提示位置；设置为“不使用”或关闭 RB 扩展后会隐藏对应提示。
+- 新增 `GQSRBZoom_Moodles.lua` 的只读锚点接口，复用其已有的原生 Moodle 顺序、图标矩形和每位玩家 viewport 计算。提示定位跟随分屏中各玩家独立的情绪图标堆栈；锚点低频缓存，避免在每帧绘制中重复扫描全部情绪状态。
+- 不更改 RB+方向键实际输入、情绪选择、缩放行为或 RT+B 行为；缩放与 RT+B 提示仍留在左下角。暂不实现未来的缩放轮盘动态提示。
+
+验证说明
+- 已完成 Lua 语法检查、UTF-8 无 BOM、版本号、配置映射模拟、提示位置锚点模拟、Full/OnlyPatch 文件差异与 ZIP 完整性检查。
+- 模拟检查不等同于 Build 42.21.0 游戏内测试；需重点观察单人和分屏时 RB+上/下图标是否紧贴情绪图标堆栈，及将左/右改配为情绪操作后图标是否自动更新。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSRBZoom_Moodles.lua`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.17（修复世界焦点快捷键提示的纹理尺寸报错）
+
+世界焦点快捷键提示
+- 修复 v1.5.1.16 中提示绘制每帧调用 `JoypadIconTextureGetter:getWidthOrig()` / `getHeightOrig()`，在部分按键纹理 getter 内部纹理为空时不断触发 Lua 错误的问题。
+- 改为与原版 `ISButtonPrompt` 一样直接通过 `drawTexture()` 绘制官方按键图标，不再主动调用 `getWidthOrig()` / `getHeightOrig()` 查询尺寸，使用原版提示常用的 32px 图标槽对齐。
+- 原版 `ISButtonPrompt` 常用的 `AButton/BButton/XButton/YButton/LBumper/RBumper` 可直接使用；D-pad 和 RT 的候选原生图标只有在 `getTextureFilePath()` 确认存在真实纹理路径时才绘制，否则分别回退为方向箭头和“RT”文字，避免未知键名返回空纹理 getter。
+- 如果图标绘制失败，显示相应按键的文字回退，不中断 `ISButtonPrompt` 原始绘制。快捷键动作和配置逻辑不变。
+
+验证说明
+- 已完成 Lua 语法检查、关键尺寸方法引用检查、版本号/UTF-8 编码检查、ZIP 完整性和 Full/OnlyPatch 对应文件一致性检查。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内复测；需确认世界焦点提示不再刷错，并检查 RB、Y/A、方向键与 RT+B 的显示。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.16（玩家世界焦点快捷键提示）
+
+左下角手柄提示
+- 新增独立模块 `42/media/lua/client/GQSWorldFocusShortcutHints.lua`，在原版 `ISButtonPrompt` 的左下角提示区域上方绘制 GQS 快捷操作提示；只显示提示，不接管或改变实际按键行为。
+- 根据 Mod Options 实时读取 RB 组合键开关、RB+方向键动作，以及 RB+Y/A 动作。将当前配置归组显示为“缩放视角”和“切换情绪信息”；方向键被改配后，提示会跟随新映射变化；设置为“不使用”或关闭 RB 组合键拓展的动作不会显示。
+- 在 `rtBFocusEnabled` 启用时显示 RT+B“聚焦玩家 / 关闭所有面板”提示；关闭选项后隐藏该行。使用 `Joypad.Texture` 中的原生 RB、RT、方向键、Y、A、B 图标，不绘制自制按键图案。
+- 仅在对应玩家使用手柄且世界界面获得焦点时显示；优先沿用原版 `ISButtonPrompt` 的 viewport/锚点和绘制层级，因此兼容每个玩家的屏幕区域。不改动 RB、RT+B 的输入处理，不提前实现后续 Y 功能提示。
+- 新增中英文 UI 翻译键 `UI_GQS_WorldHint_Zoom`、`UI_GQS_WorldHint_Moodle`、`UI_GQS_WorldHint_RTB`，同步更新 JSON 与 TXT 资源。
+
+验证说明
+- 已完成 Lua 语法检查、快捷键配置读取模拟测试、翻译 JSON 解析、版本号/UTF-8 编码检查、ZIP 完整性与 Full/OnlyPatch 文件一致性检查。
+- 模拟测试确认默认配置映射到：RB+左/右/Y/A 缩放视角、RB+上/下切换情绪信息、RT+B 聚焦玩家/关闭所有面板；方向映射更改、禁用动作和关闭对应开关均会更新提示列表。模拟结果不等同于游戏内实测。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内实测；需确认原生图标名称在当前 UI 资源中可用、提示位置不与其他 HUD/长文本冲突。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSWorldFocusShortcutHints.lua`
+- `42/media/lua/shared/Translate/CN/UI.json`
+- `42/media/lua/shared/Translate/CN/UI_CN.txt`
+- `42/media/lua/shared/Translate/EN/UI.json`
+- `42/media/lua/shared/Translate/EN/UI_EN.txt`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.15（地图 R3 聚焦玩家）
+
+- 地图获得手柄焦点时，按下 R3（右摇杆按键）调用游戏原版 `ISWorldMap:onCenterOnPlayer()`，行为与点击地图右下方 C 按钮一致；沿用原版地图过渡逻辑。
+- 在地图左下角原有按键提示组新增原生右摇杆按压图标与“聚焦玩家位置”提示，放在现有缩放提示行上方；仅地图可见且手柄焦点有效时显示。
+- 新增 `42/media/lua/client/GQSWorldMapR3Focus.lua` 独立模块；不修改游戏原版或 CustomGamepadUI Workshop 文件，不改变地图的其他输入。
+- 新增中英文翻译键 `UI_GQS_MapFocusPlayer`。
+
+验证说明
+- 完成 Lua 语法检查、翻译 JSON 解析、版本号/UTF-8 编码检查、ZIP 完整性与 Full/OnlyPatch 对应文件一致性检查。
+- 通过隔离 Lua 模拟测试，确认 R3 调用原版聚焦回调、其他按键继续交给原版处理、提示仅在地图手柄焦点下绘制；该模拟测试不等同于游戏实测。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内实测；需确认 R3 输入映射和原生右摇杆图标在游戏内显示正常。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSWorldMapR3Focus.lua`
+- `42/media/lua/shared/Translate/CN/UI.json`
+- `42/media/lua/shared/Translate/CN/UI_CN.txt`
+- `42/media/lua/shared/Translate/EN/UI.json`
+- `42/media/lua/shared/Translate/EN/UI_EN.txt`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.14（识别混合液体的管道水源）
+
+D-pad 上方向情境轮盘
+- 修复连接雨水收集桶的水槽在雨水与葡萄酒等混合液体存在时，可能因 `object:hasWater()` 返回 false 而不显示“饮用/灌满”的问题。
+- 保留原版 `hasWater()` 判断；仅当对象明确声明使用/拥有外接水源，且通过 `FindExternalWaterSource()` 找到的来源仍含有流体时，才启用备用识别。
+- 饮水与灌水回调仍绑定到水槽对象本身，而不是雨水收集桶，以保留原版管道供水和混合液体传输行为；不改变背包容器筛选/选择规则。
+- 新增一条轻量诊断日志，用于确认混合液体水源是否走备用识别路径；不修改 CustomGamepadUI 上游文件。
+
+验证说明
+- 已完成 Lua 语法检查、版本号检查、ZIP 完整性与 Full/OnlyPatch 文件一致性检查。
+- 尚未在 Project Zomboid Build 42.21.0 实机测试；需要在接入雨水收集桶且桶内含水酒混合液的水槽旁确认轮盘显示及实际饮用/灌水回调。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSTileRadialMenuFix.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.13（修复轮盘报错与破损窗户窗帘名称）
+
+D-pad 上方向情境轮盘
+- 修复 v1.5.1.12 中饮用/灌水标签生成函数遗漏的问题。此前打开某些包含水源（例如厕所马桶）的轮盘时，`addNeighborSlices` 调用缺失的 `makeDrinkLabel` 会报 `Object tried to call nil` 并导致轮盘构建失败。
+- 恢复统一的饮用/灌水标签生成：饮用第二行显示当前水源名称；灌满第一行显示正确容器 UI 名称、第二行显示对应水源。重复进入 `addSlice` 包装时不会重复追加来源名称。
+- 加强窗帘目标名称的兜底：优先显示关联窗户/门的名称；破损、打碎、宿主无法解析或精灵无自定义名时，显示本地化“窗户/门”，不再因缺少 `CustomName` 而漏掉第二行。
+- 保留 v1.5.1.12 的其他操作对象标签、原版回调和容器选择逻辑；不修改 CustomGamepadUI 上游文件。
+
+验证说明
+- 完成 Lua 语法检查、关键标签函数存在性检查、版本号和 UTF-8 编码检查、ZIP 完整性，以及 Full/OnlyPatch 对应文件一致性检查。
+- 尚未在 Project Zomboid Build 42.21.0 中实机测试。
+
+v1.5.1.12（扩展轮盘操作对象的第二行名称）
+
+D-pad 上方向情境轮盘
+- 将“操作 | 操作对象”的两行显示方式扩展到开关灯、开关窗帘、门锁、收音机、打碎玻璃/清理碎玻璃和木板/金属加固相关切片。
+- 对可移动物体名称沿用原版 `CustomName` / `GroupName` + `Translator.getMoveableDisplayName(...)` 规则；窗帘优先反查对应的窗户/门，避免显示 IsoCurtain 等内部类名。
+- 无法取得自定义名称时，使用本地化的“电灯开关/窗户/门/收音机”类别名称；不改变原有回调对象、行动参数或交互流程。
+- 保留 v1.5.1.11 已修复的饮用/灌水两行标签、来源去重、灌水容器名称和图标逻辑；不修改 CustomGamepadUI 上游文件。
+
+验证说明
+- 完成 Lua 语法检查、翻译 JSON 解析、版本号/编码检查及 Full/OnlyPatch 文件一致性与 ZIP 完整性检查。
+- 尚未在 Project Zomboid Build 42.21.0 内实机测试；需要确认不同家具的 CustomName 以及窗帘所属窗户名称在游戏内的实际显示。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSTileRadialMenuFix.lua`
+- `42/media/lua/shared/Translate/CN/UI.json`
+- `42/media/lua/shared/Translate/CN/UI_CN.txt`
+- `42/media/lua/shared/Translate/EN/UI.json`
+- `42/media/lua/shared/Translate/EN/UI_EN.txt`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.11（修正水源标签缺失和重复）
+
+D-pad 上方向情境轮盘
+- “灌满 容器”切片现在也在第二行显示该切片实际绑定的水源名称，与“饮用”切片一致。
+- 修正邻近水源选项在原版轮盘与 GQS 扩展轮盘双重 addSlice 包装时重复追加水源名称的问题；同一个切片的水源名称只显示一次。
+- 统一原版与 GQS 新增“灌满”切片的标签构建：保留污染提示、容器当前 UI 名称，并将水源名称显示在下一行。修正污染水标签可能被重复拼接的问题。
+- 保留原有水源/容器对象、`onDrink` / `onTakeWater` 回调及灌水目标选择规则；不修改 CustomGamepadUI 上游文件。
+
+验证说明
+- 完成 Lua 语法检查、版本号/编码检查、翻译 JSON 解析、ZIP 完整性及 Full/OnlyPatch 文件一致性检查。
+- 尚未在 Project Zomboid Build 42.21.0 内实机测试，需确认轮盘中央两行标签的实际渲染。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSTileRadialMenuFix.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.10（修正饮水水源名称）
+
+D-pad 上方向情境轮盘
+- 修正饮用选项第二行错误显示 `IsoObject` 的问题。原因是 v1.5.1.9 优先读取 `getObjectName()` / `getName()`，部分世界物体会把通用 Java 类名返回为显示名称。
+- 水源名称现在参照原版 `ISWorldObjectContextMenu` 的 `getMoveableDisplayName` 规则：从 sprite properties 读取 `CustomName` 和可选的 `GroupName`，再调用 `Translator.getMoveableDisplayName(...)` 本地化；世界物品对象沿用原版通过 contained item name 取得名称的方式。
+- 当物体没有可用的自定义显示名称时，使用原版的 `ContextMenu_NaturalWaterSource` 本地化文本，不再显示 `IsoObject`。
+- 不改变饮用切片绑定的水源、灌水目标容器、切片回调或 `CustomGamepadUI` 上游文件。
+
+验证说明
+- 完成 Lua 语法检查、版本号/编码检查、JSON 翻译解析、ZIP 完整性及 Full/OnlyPatch 文件一致性检查。
+- 尚未在 Project Zomboid Build 42.21.0 内实机测试；需确认具体马桶/水槽名称与 X 交互上下文显示一致。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSTileRadialMenuFix.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.9（区分饮水来源并统一容器显示）
+
+D-pad 上方向情境轮盘
+- 饮用切片改为两行显示：第一行保留“饮用”及污染提示，第二行显示该切片实际绑定的水源对象名称，方便区分相邻的马桶、水槽等水源。
+- 不修改 CustomGamepadUI 的 SWTileRadialMenu.lua；GQS 在调用原有轮盘时临时包装 addSlice，仅对原有饮水/灌水回调的标签和灌水图标做统一处理，完成后立即恢复方法。
+- 原版与 GQS 新增的灌水切片统一使用 FluidContainer:getUiName() 作为容器名称，并优先使用物品实例 getTex() 作为图标；原有回调参数、容器筛选及灌水目标选择保持不变。
+- 增加水源名称的安全回退文本。
+
+验证说明
+- 已检查修改文件、Lua 语法、翻译 JSON、版本号、ZIP 完整性及 OnlyPatch 与 Full 的文件一致性。
+- 尚未在 Project Zomboid Build 42.21.0 游戏内实测。请重点确认中央提示是否按两行显示，以及马桶/水槽名称是否与 X 交互菜单一致。
+
+【v1.5.1.8】
+- 修复上方向情境轮盘“灌水”选项的容器名称和图标显示：名称优先读取所选物品流体容器的 `getUiName()`，避免空瓶仍显示原饮料/原物品脚本名；图标优先读取物品实例当前纹理 `getTex()`，并保留 `getDisplayName()` / `getIcon()` 兼容回退。
+- 保持原有可灌水容器筛选、`getBestEvalRecurse()` 选择规则及 `onTakeWater` 实际目标不变；本次只修复轮盘显示信息读取，不改变灌水目标选择行为。
+
+验证说明：完成源码静态检查、UTF-8 无 BOM、版本号、更新日志、ZIP 结构及归档完整性检查；未在 Project Zomboid Build 42.21.0 内实机测试。名称和图标的最终显示效果仍需游戏内确认。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSTileRadialMenuFix.lua`
+- `CHANGELOG_zh-CN.txt`
+
+【v1.5.1.7】
+- 扩展上方向情境轮盘：靠近可操作的 IsoLightSwitch 时显示“开灯/关灯”，调用原版 ISWorldObjectContextMenu.onToggleLight，保留原版寻路与计时动作。
+- 靠近完好且玻璃未移除的 IsoWindow 时新增“打碎玻璃”，调用原版 ISWorldObjectContextMenu.onSmashWindow；破碎窗户的清除玻璃功能保持原样。
+- 为后续拓展提供 `GQSTileRadialMenuFix.registerProvider(id, callback, priority)` 接口。Provider 可读取当前/正面/周围 3x3 方格的对象集合，并用 `context:addSlice(...)` 添加轮盘操作；支持注销、优先级排序和错误隔离。
+- 保留原版 CustomGamepadUI 文件不变；保持丢下穿着的背包以及车辆/动物原生轮盘优先级。
+
+验证说明：检查版本号、Lua 编码/BOM、翻译 JSON、ZIP 结构和与 v1.5.1.6 的文件差异；未在 Project Zomboid Build 42.21.0 内实机测试。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSTileRadialMenuFix.lua`
+- `42/media/lua/shared/Translate/CN/UI.json`
+- `42/media/lua/shared/Translate/CN/UI_CN.txt`
+- `42/media/lua/shared/Translate/EN/UI.json`
+- `42/media/lua/shared/Translate/EN/UI_EN.txt`
+- `DEV_API_TileRadialMenu_zh-CN.md`
+- `CHANGELOG_zh-CN.txt`
+
+【v1.5.1.6】
+- 特质详情两列选择器的上下导航改为列内循环：在当前列第一项按上，直接选中该列最后一项；在最后一项按下，循环回该列第一项。
+- 左右切换列的既有行为、选中框/描述同步、超出列表滚动逻辑均保持不变。
+
+验证说明：静态检查确认修改仅涉及特质选择器的上下索引边界、版本号与更新日志；未在 Project Zomboid Build 42.21.0 内实测。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSTraitInfoPanel.lua`
+- `CHANGELOG_zh-CN.txt`
+
+【v1.5.1.5】
+- 对照 Build 42 的 ISCharacterScreen:loadTraits() 确认：原版特质图标调用 ISImage:setMouseOverText(trait:getLabel() .. "\n" .. trait:getDescription())；面板信息增强的技能经验提示使用 Bar:updateTooltip()，与特质详情提示并未共用同一套生成函数。
+- 修正手柄特质详情提示框的创建布局：不再调用 setName("") 制造空标题；明确清空 tooltip.name，并设置 nameMarginX=0、defaultMyWidth=0，贴近原版无独立标题的 tooltip 布局。
+- 保留手柄选择时主动显示 tooltip 的行为、原版特质名称+换行+描述文本，以及现有位置和宽度控制。未修改原版文件。
+
+验证说明：已完成代码差异、编码/BOM、版本号、翻译 JSON 和 ZIP 结构检查；本环境没有 Lua/Kahlua 解释器，也未在 Project Zomboid Build 42.21.0 内实测，空白区域是否完全消失仍需游戏内确认。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSTraitInfoPanel.lua`
+- `CHANGELOG_zh-CN.txt`
+
+【v1.5.1.4】
+- 打开特质详情时自动选中第一项有益特质并显示描述；若没有有益特质则选择负面特质第一项。
+- 信息页右下角提示在详情展开时继续显示，文案切换为“X 关闭详情”。
+- 收紧原版特质说明提示的最大行宽，避免描述框出现过大的空白区域。
+- 有益与负面特质分别按点数绝对值从低到高排序；同点数时按名称排序。
+
+v1.5.1.3（修复特质选择器初始焦点与紧凑排版，2026-10-20）
+
+- 修复特质详情侧栏打开后，首次上下移动只显示描述却没有选中框的问题：第一次上下输入会明确建立当前列选择状态，并选中左列第一项；之后上下移动正常更新选择框和描述。
+- 侧栏打开时不把标题当作可选项，也不自动显示某项特质描述；首次方向输入后才显示选中特质的原版风格描述。
+- 特质名称列表改用原生 `UIFont.AutoNormSmall`（不可用时回退到 `UIFont.Small`），稍微缩小字号并减少行高。
+- 标题栏高度从 34 增至 42，标题、B 图标和“关闭”垂直居中，分隔线和列表内容随之下移，避免标题区拥挤。
+
+验证说明：已检查 Lua 语法、无 BOM、版本号和 Full/OnlyPatch ZIP 结构；未在 Project Zomboid Build 42.21.0 内实测。
+
+本次更新修改文件
+- `42/mod.info`
+- `42/media/lua/client/GQSTraitInfoPanel.lua`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.2（手柄特质选择器两列重构，2026-10-20）
+
+- 按用户反馈重构角色信息页的特质详情侧栏：不再一次性铺开所有特质描述，改为只显示特质图标和名称的两列选择器。
+- 左列显示正点数特质及零点数/职业特质（职业/中性特质使用中性色）；右列显示负点数特质。保留原有好坏颜色区分，不显示浪费空间的“有益特质/负面特质”分组标题。
+- 手柄十字键上/下选择当前列的特质，左/右切换两列；选中后才弹出标准 ISToolTip，文本与原版特质图标悬停提示一致（特质名称换行后接游戏提供的描述）。列表超出窗口高度时随选择滚动。
+- 侧栏宽度缩回适合两列特质名称的范围，高度改为匹配角色信息面板；不再使用前版 14 行内容高度和超宽文字墙布局。
+- 侧栏标题栏使用原版 `Joypad.Texture.BButton` 图标并只显示“关闭”；原信息页右下角使用原版 `Joypad.Texture.XButton` 图标和“特质信息”。补齐 CN/EN `UI.json` 中缺失的 `UI_GQOS_TraitOpenHint`，避免直接显示翻译键；更新设置说明以反映新的方向键选择方式。
+- 保持按 X 开关侧栏、按 B 优先关闭侧栏、现有面板信息增强总开关和动态读取当前角色特质的行为。不修改原版文件或其他面板增强功能。
+
+验证说明
+- 已使用系统 Lua 5.4 解析器检查本次 Lua 文件语法；CN/EN UI.json 解析、Lua UTF-8 BOM、版本号和 Full/OnlyPatch ZIP 结构检查通过。Lua 5.4 语法检查不替代游戏内 Kahlua/Build 42.21.0 实测。
+- 本环境未运行 Project Zomboid Build 42.21.0，标准 ISToolTip 的实际显示位置、左右列导航、长列表滚动和分屏效果仍需游戏内确认。
+
+本次更新改动文件
+- `42/mod.info`
+- `42/media/lua/client/GQSTraitInfoPanel.lua`
+- `42/media/lua/shared/Translate/CN/UI.json`
+- `42/media/lua/shared/Translate/CN/UI_CN.txt`
+- `42/media/lua/shared/Translate/EN/UI.json`
+- `42/media/lua/shared/Translate/EN/UI_EN.txt`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.1.1（特质详情面板紧凑排版，2026-10-20）
+
+- 特质详情面板加宽，并将高度目标调整为约 14 行内容；屏幕空间不足时自动收缩并保留滚动。
+- 移除“有益特质/负面特质/其他特质”分组标题，按有益、负面、其他的顺序直接列出特质，继续使用绿色/红色区分。
+- 每项特质改为“名称：描述”的横向排版，描述尽量延伸到面板边缘后再换行，续行与描述起始位置对齐。
+- 将“B 关闭”移到详情标题同行右上角；信息面板右下角增加“X 特质信息”提示。
+- 未修改特质数据来源与按键开关逻辑。
+
+验证说明：完成源码静态检查、版本信息检查和 ZIP CRC 检查；当前环境没有 Project Zomboid 游戏运行环境，尚未进行游戏内测试。
+
+v1.5.1.0（信息面板新增手柄特质详情侧栏，2026-10-20）
+
+角色信息页特质详情
+- 新增 `GQSTraitInfoPanel.lua`，在角色信息页按 X 展开/收起右侧特质详情面板；按 B 也可先关闭详情面板，不立即关闭整个信息页。
+- 使用原版 `ISCharacterScreen.displayedTraits` / `CharacterTraitDefinition`，读取当前角色实际显示的特质图标、名称与描述；不硬编码特质列表，兼容游戏内已注册的模组特质。
+- 按定义点数分组：消耗点数的有益特质排前并用绿色显示；返还点数的负面特质排后并用红色显示；零点数/职业特质单列为其他组。
+- 面板位于信息面板右侧，尽量与原窗口边缘对齐；D-pad 上/下滚动内容，支持鼠标滚轮辅助滚动。若可用空间不足，会尝试放到左侧或在玩家视口内调整位置。
+- 功能受现有“启用面板信息增强”总开关控制；中英文翻译键同步添加。未修改原版 `ISCharacterScreen.lua`、未更改其他面板功能。
+
+验证说明
+- 已静态检查新 Lua 文件结构、翻译 JSON、UTF-8 无 BOM、版本号及 ZIP 结构。
+- 当前环境未在 Project Zomboid Build 42.21.0 内运行测试；需要实测 X 开关、D-pad 滚动、窗口移动/关闭、中文和英文长描述换行、模组特质及分屏布局。
+
+本次更新改动文件
+- `42/mod.info`
+- `42/media/lua/client/GQSTraitInfoPanel.lua`（新增）
+- `42/media/lua/shared/Translate/CN/UI.json`
+- `42/media/lua/shared/Translate/CN/UI_CN.txt`
+- `42/media/lua/shared/Translate/EN/UI.json`
+- `42/media/lua/shared/Translate/EN/UI_EN.txt`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.0.39（整理 RB+A 拦截状态管理，正式加入可选 B 键打碎玻璃禁用功能，2026-10-20）
+
+RB+A 输入处理
+- 保留已在 Build 42.21.0 实测成功的核心修复：RB+A 快捷键占用 A 时，运行时临时移除 `CharacterJoypadButtonBinding.Interact` 的 A 绑定；释放 RB 与 A 后恢复。
+- 将 OnTick 的遮罩决策整理为一个明确的状态协调分支；输入事件钩子仍保留即时屏蔽的快速路径，OnTick 负责保持状态和安全恢复，避免因焦点短暂变化提前恢复原生交互。
+- 移除仅用于定位问题的 `ISButtonPrompt` 原生动作入口观察包装，不再为门窗/翻越等方法额外叠加观测钩子。保留必要的 RB+A/Y 输入消费钩子。
+- 默认关闭详细 `rbZoom` 诊断日志，避免普通游戏过程中持续输出输入状态；需要排错时可在 `GQSDebugLog.lua` 中临时启用该分类。
+- 不改动 RB+Y、RB+方向键、容器导航及其他组合键的动作映射；不保存或重写 InputBindings XML。
+
+正式加入“禁用 B 键打碎玻璃”
+- 将临时测试脚本正式更名为 `GQSDisableSmashWindow.lua`，移除旧的只读状态监视器。
+- 在 Mod Options 最后段的“其他杂项”中新增“禁用 B 键打碎玻璃”开关，默认关闭，避免改变未主动启用用户的原生操作习惯。
+- 开启后，仅运行时移除 `CharacterJoypadButtonBinding.SmashWindow` 的 B 按钮绑定；关闭后恢复本次功能移除的 B 绑定。若用户或其他模组改成了其他按钮，则保留新的映射。
+- 该开关不修改 `ClimbThrough` 或其他动作绑定，不保存/重写 InputBindings XML。Controller 设置页可能仍显示配置文件中的原始 B 绑定，因为改动仅在运行时生效。
+- OnlyPatch 会将旧 `GQSSmashWindowBindingTest.lua` 覆盖为无功能的迁移占位文件，防止旧诊断器在覆盖更新后继续运行；Full 完整包不再包含旧文件名。
+
+验证说明
+- 已静态检查新增设置 ID、默认值、中英文 TXT/JSON 翻译、Lua 语法结构及 Full/OnlyPatch ZIP 结构。
+- RB+A 的 `Interact` 临时屏蔽方式沿用用户已实测成功的 v1.5.0.38 实现；本版未在游戏内实测重构后的回归结果。
+
+本次更新改动文件
+- `42/mod.info`
+- `42/media/lua/client/GQSRBZoom.lua`
+- `42/media/lua/client/GQSModOptions.lua`
+- `42/media/lua/client/GQSDebugLog.lua`
+- `42/media/lua/client/GQSDisableSmashWindow.lua`（新增）
+- `42/media/lua/client/GQSSmashWindowBindingTest.lua`（OnlyPatch 迁移占位；Full 移除）
+- `42/media/lua/shared/Translate/CN/UI_CN.txt`
+- `42/media/lua/shared/Translate/EN/UI_EN.txt`
+- `42/media/lua/shared/Translate/CN/UI.json`
+- `42/media/lua/shared/Translate/EN/UI.json`
+- `CHANGELOG_zh-CN.txt`
+
+v1.5.0.38（修复诊断刷屏并临时屏蔽 RB+A 的原生 Interact，2026-10-20）
+
+- 根据 .37 实测日志定位到 `CharacterJoypadButtonBinding.Interact` 仍绑定 A，且 RB+A 激活时 `Interact.isDown(joypadBind)=true`。虽然 `JoypadControllerData:onPressButton` 记录为 `CONSUMED`，原生动作绑定仍独立报告 A 按下，说明只跳过 Lua 分派不足以屏蔽全部交互路径。
+- 当世界焦点有效、背包/战利品窗口关闭、RB 已按下且 A 缩放快捷键已启用时，仅临时移除 `CharacterJoypadButtonBinding.Interact` 的按钮 A 绑定；RB 与 A 都释放后恢复原来的 A 绑定。若检测到当前 Interact 映射变成其他按钮，则保留新映射，不覆盖该外部变化。
+- 临时屏蔽只在内存运行期间生效：不写入、不保存、不重写 InputBindings XML；不修改 `ClimbThrough`、`SmashWindow`、`Inventory`、`Loot` 或其他动作绑定。
+- 修复每帧刷屏：`installNativeButtonInterceptors()` 在 OnTick 重试时，只有钩子状态变化才输出 `Controller dispatcher hook status`。保持 A/Y 输入判定日志与组合键边沿日志用于诊断。
+- 增加 `INTERACT-MASK` 状态日志，可确认临时移除、恢复、跳过或失败；搭配 `NATIVE-BINDING-TRACE` 检查激活期间 `Interact` 是否变为 unbound 及释放后恢复 A。
+- 尚未在 Build 42.21.0 游戏内实测。此修复是依据 .37 日志中 `Interact=A/isDown=true` 的证据制定，是否完全阻止窗/门/翻越操作仍须实机验证。
+
+本次更新改动文件
+- `42/mod.info`
+- `42/media/lua/client/GQSRBZoom.lua`
+- `CHANGELOG_zh-CN.txt`
+
+验证说明
+- 预期日志：`INTERACT-MASK; state=APPLIED`（RB+A 组合启用时）、`NATIVE-BINDING-TRACE` 中 `Interact` 不再是 `button:A`，以及 `INTERACT-MASK; state=RESTORED`（RB 释放后）。
+- 若仍出现原生翻窗/门窗操作，需确认操作发生时是否有 `INTERACT-MASK state=APPLIED`，以及当时 `Interact` 是否仍显示为 A；这能判定下一步是否需要在更低的游戏动作层拦截。
+
+v1.5.0.37（双层按键分派拦截与原生动作绑定状态诊断，2026-10-20）
+
+- 基于 v1.5.0.36 的日志修正拦截结构：之前 `JoypadControllerData:onPressButton` 仅在 `onPressButtonNoFocus` 不可用时才作为备用钩子，因此即使内层函数被跳过，外层分派仍可能继续处理。本版在方法可用时同时包装 `onPressButton` 和 `onPressButtonNoFocus`；RB+Y/A 有效时优先在外层入口消费，避免原版分派逻辑继续执行。
+- 日志会分别记录两个分派钩子的安装状态和对应的 A/B/Y 输入判定，方便确认真实输入经过了外层、内层中的哪一层。
+- 在 `GQSSmashWindowBindingTest.lua` 增加只读快照，监测 RB+A 激活期间及释放时 `CharacterJoypadButtonBinding.Interact`、`InteractOptions`、`ClimbThrough`、`SmashWindow`、`Inventory`、`Loot` 的当前按钮/轴绑定与 `isDown(joypadBind)` 状态；记录物理 RB/A/B/Y 状态，不修改任何绑定。
+- 保留原有 `SmashWindow` 状态、配置重载和 Controller 设置页诊断；不调用 `removeBinding()`，不保存或重写 InputBindings XML，不更改任何动作绑定。
+- 当前改动是基于日志证据的输入分派修正和进一步诊断；需用游戏实测确认外层消费是否能阻止门窗/翻越等原生操作。本环境没有 Project Zomboid Build 42.21.0 游戏运行环境，不能宣称已经实机验证。
+
+本次更新改动文件
+- `42/mod.info`
+- `42/media/lua/client/GQSRBZoom.lua`
+- `42/media/lua/client/GQSSmashWindowBindingTest.lua`
+- `CHANGELOG_zh-CN.txt`
+
+验证说明
+- 静态检查确认两个 `JoypadControllerData` 分派方法被分别注册；RB+A 时记录原生动作绑定状态的观察器为只读。
+- 未进行游戏内运行验证；需要以 `Controller dispatcher hook status`、`INPUT-TRACE; stage=JoypadControllerData; hook=JoypadControllerData:onPressButton`、`NATIVE-BINDING-TRACE` 和实际门窗交互结果确认。
+
+v1.5.0.36（RB+A/Y 原生输入链路诊断与只读按键日志，2026-10-20）
+
+- 基于 v1.5.0.35，重点诊断 RB+A 缩放已执行但原生 A 交互仍可能发生的输入链路；本版不宣称已实测解决原生操作泄漏。
+- 在 `JoypadControllerData:onPressButtonNoFocus`（可用时的分派入口）记录 A/B/Y 原始按钮值、控制器 id、`controllerData.joypad.player`、玩家编号解析结果、RB/A/B/Y 实际按下状态、世界焦点、背包/搜寻窗口状态、配置动作、等待释放标志，以及拦截决策和是否跳过原函数。
+- 对 `ISButtonPrompt:onAPress`、`onBPress`、`onYPress` 记录提示对象玩家解析、当前组合键状态和消费/放行原因。`onBPress` 继续只作为 RB+A 的诊断/兼容路径，不新增 RB+B 功能。
+- 为 `ISButtonPrompt:interact`、A/B 门窗处理、翻越窗/围栏、打碎玻璃、进出车辆、车门/门窗操作等具体动作入口添加只读跟踪；日志会指出哪个原生动作函数实际进入，以及进入时 RB+A/Y 是否仍处于活动状态。跟踪包装不阻止这些原生函数，也不改变它们的返回值。
+- 在 OnTick 中记录 RB+Y/A 组合键状态从未激活到激活、以及释放时的边沿状态，用于与 `Zoom action executed` 和原生动作入口日志按帧序对照。
+- 将 `GQSSmashWindowBindingTest.lua` 改为只读观察器：只记录 `CharacterJoypadButtonBinding.SmashWindow` 当前绑定、配置重载和 Controller 设置页切换；不再调用 `removeBinding(...)`，不再禁用 B 的打碎玻璃动作。它只是帮助对照 B 输入，不是 RB+A 问题的解决方案。
+- 不保存、不重写 InputBindings XML；不调用 `setDefault()` / `setAllToDefault()`；不改变其他动作绑定。现有 RB+A/Y 的消费条件保持不变，以免诊断版本掩盖原始漏拦路径。
+- 更新 `mod.info` 版本号至 1.5.0.36。
+
+本次更新改动文件
+- `42/mod.info`
+- `42/media/lua/client/GQSRBZoom.lua`
+- `42/media/lua/client/GQSSmashWindowBindingTest.lua`
+- `CHANGELOG_zh-CN.txt`
+
+诊断重点
+- 若看到 `stage=JoypadControllerData ... decision=PASS; player index unresolved`，说明分派钩子收到了面键但无法映射玩家，输入因此放行。
+- 若看到 `stage=ISButtonPrompt ... decision=PASS; live chord check returned false`，对照同帧的 `OnTick-chord-transition` 可判断是焦点/窗口条件、按键状态还是边沿顺序导致组合键判断失败。
+- 若出现 `NATIVE-ACTION-ENTRY; method=ISButtonPrompt:...` 且 `chordA=true`，说明原生动作入口确实在 RB+A 活跃时执行；其前面应该能找到相应的 PASS/CONSUMED 日志，可以据此决定下一版在哪一层消费输入。
+- 本环境未安装 Project Zomboid Build 42.21.0 游戏运行环境或 Lua/Kahlua 解析器；已做源码静态检查和 ZIP CRC 验证，未执行游戏内测试。
+
+v1.5.0.35（SmashWindow 重载后重新解绑与 Controller 页切换诊断，2026-10-20）
+
+- 基于 v1.5.0.34，只更新临时 `GQSSmashWindowBindingTest.lua` 实验脚本和版本文档；不改动其他功能模块。
+- 在 Lua 暴露的 `reloadControllerConfigFiles()` 调用前、原函数返回后、再次移除 SmashWindow 绑定后分别记录快照；如原函数报错，先记录再继续向上抛出错误。
+- 增加仅针对 `CharacterJoypadButtonBinding.SmashWindow` 的状态观察器：初次运行时解绑后，若检测到按钮/轴绑定恢复或发生绑定变化，记录前后状态并再次调用该动作自己的 `removeBinding(...)`。不检查或修改其他动作绑定。
+- 改用 `MainOptions` 标签页的 `onActivateView` 实际回调记录 Controller 设置页进入/离开，并保留经过修正的逐帧轮询诊断作为回退路径；日志会记录检测到的标签索引、视图名称和 SmashWindow 状态。
+- 不直接包装 Java 静态方法，不调用 `CharacterInputBindingSet.resetAllToDefault()`，不调用 `setDefault()` / `setAllToDefault()`，不保存或重写任何 InputBindings XML。
+- 更新 `mod.info` 版本号至 1.5.0.35。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSSmashWindowBindingTest.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已从 v1.5.0.34 Full ZIP 解包并以其为基线；本版本仅改动上述 3 个文件。
+- 已执行源码结构检查与 ZIP CRC 检查；当前环境没有可用的 Project Zomboid Build 42.21.0 游戏运行环境，尚未完成 Lua/Kahlua 解析和游戏内实测。需以 `RELOAD-BEGIN` / `PRE-RELOAD` / `POST-RELOAD`、`REBIND-DETECTED` / `POST-DISABLE` 及 `CONTROLLER SETTINGS ENTER/EXIT` 日志验证实际路径。
+
+v1.5.0.34（修复 SmashWindow 实验中的 Java 对象访问，并记录控制器设置切换状态，2026-10-20）
+
+- 修复 v1.5.0.33 的 Kahlua 错误：实验脚本不再通过 `bindingObject["getButton"]` 对 Java 绑定对象动态取方法；改为直接调用 CharacterJoypadButtonBinding 的 `getJoypadButton()`、`getJoypadAxis1d()`、`getJoypadAxis2d()`，并仅对 SmashWindow 动作调用相应的 `removeBinding(...)` 重载。
+- 禁用前后记录每个直接 getter 是否成功、当前按钮/轴值、绑定对象信息和移除调用结果；仅当各直接 getter 均成功且返回空值时，才报告运行时无按钮/轴绑定。
+- 移除原先约每 5 秒的周期状态采样；改为监测 MainOptions 的 Controller 选项页进入/离开，在状态切换瞬间记录 SmashWindow 当前绑定。启动快照与 PRE-DISABLE/POST-DISABLE 记录保留。
+- 不编辑/保存 InputBindings XML，不调用 setDefault() 或 setAllToDefault()；禁用动作只尝试一次，发现后续被重新绑定时只记录、不再次自动移除。除 CharacterJoypadButtonBinding.SmashWindow 外，不改变任何其他动作。
+- 更新 mod.info 版本号至 1.5.0.34。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSSmashWindowBindingTest.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 根据用户提供的 v1.5.0.33 日志定位到 `attempted index: getButton of non-table: ...JoypadButtonBinding`；本版移除对该 Java userdata 的动态字段/方法访问。
+- 已检查 Lua 文件编码无 BOM、版本与 ZIP 结构/CRC。官方 Java API 文档列出了上述直接 getter 与各类型 `removeBinding` 重载，但当前环境没有 Lua/Kahlua 解析器，未执行游戏 Lua 编译或实机验证。
+- 安装后应确认日志包含 `PRE-DISABLE`、`POST-DISABLE`，且不再出现 `attempted index: getButton of non-table`；随后进入并退出 Game Options → Controller 页，收集 `CONTROLLER SETTINGS ENTER` 与 `CONTROLLER SETTINGS EXIT` 记录。
+
+v1.5.0.33（临时实验：运行时禁用 SmashWindow 并监测手柄设置状态，2026-10-20）
+
+- 基于用户实测发现：XML 中 `<button binding="SmashWindow"/>` 的空按钮记录在重开手柄设置后不会反映到界面，且再次保存时整行会消失；改绑 RS 等有效按钮却可正常保存/读取。
+- 新增独立实验模块 `GQSSmashWindowBindingTest.lua`。在游戏手柄绑定初始化后，仅对 `CharacterJoypadButtonBinding.SmashWindow` 读取当前按钮/轴绑定，并尝试调用该动作自己的 `removeBinding(currentBinding)`，不触碰其他动作或按键。
+- 记录模块加载时、尝试禁用前后以及后续运行时的绑定状态。监测到绑定变化时记录变化；每隔约 5 秒输出有限次数状态采样，方便用户对照打开/退出控制器设置的时间。
+- 仅作本次诊断的运行时实验：不修改 InputBindings XML、不保存手柄配置、不调用 `setDefault()` 或 `setAllToDefault()`，也不会在检测到游戏/UI 重新绑定后自动再次清除，以保留重置证据。
+- 更新 `mod.info` 版本号至 1.5.0.33。该实验包以用户已测试的 v1.5.0.31 Full 为基线，不包含此前未确认的额外 RB+A 改动。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSSmashWindowBindingTest.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 官方 Build 42 Java API 文档列出 `CharacterJoypadButtonBinding.SmashWindow`、`getBinding()`、`getJoypadButton()`、`removeBinding(JoypadButton)` 等接口；本实验只操作该动作，并对调用使用 `pcall` 记录错误。
+- 已做源码静态检查、Lua UTF-8 无 BOM 检查及 ZIP 结构/CRC 检查；环境没有 Lua/Kahlua 解释器，未进行 Lua 编译或游戏实测。
+- 用户测试时先进入标题菜单，等待日志出现 `PRE-DISABLE` / `POST-DISABLE`；再打开并关闭手柄设置，观察 `[GQS RB Zoom] [SmashWindow Test] STATE CHANGE` 和周期状态采样。若界面仍显示 B，请记录当时 API 状态是 `button:B` 还是 `unbound(getBinding=nil)`。
+
+v1.5.0.31（基于 v1.5.0.23 重整 RB 组合键与原版输入拦截，2026-10-20）
+
+- 以 v1.5.0.23 完整包为基线，仅移植 v1.5.0.24–.28 中与 RB 组合键有关的方向默认值、RB+Y/A 选项、旧默认配置迁移和中英文提示；不复制 .26–.28 在 GQSPanelQuickSelect.lua 中分散的 RB+Y 拦截/事后恢复代码；该文件只增加一条协作保护，避免面板自身的 Y 手势在 RB+Y 时被启动或重放。
+- RB+上/下默认切换上一个/下一个心情状态；RB+左/右默认缩小/放大视角。保留方向键独立设置及世界焦点限制；背包/搜寻窗口打开时，RB+上下继续交给原容器切换逻辑。
+- 新增 RB+Y（默认放大）和 RB+A（默认缩小），各自可设为放大、缩小或不使用；保持“先按 RB，再按功能键”的输入顺序，不触发 RB 按下前已按住的 Y/A。
+- 将原版输入抑制集中在 GQSRBZoom.lua：优先包装 JoypadControllerData:onPressButtonNoFocus；可用时再以 JoypadControllerData:onPressButton 为分派层备用，并为 ISButtonPrompt 的 Y/A/B 相关处理函数提供受组合键状态约束的兜底。只有世界焦点、容器关闭且对应 RB 组合键已启用时才消费输入。
+- RB+Y/A 均优先尝试在原版按键分派前消费对应输入，不再把背包打开后的事后恢复当作成功拦截；实际是否命中仍以日志和游戏测试为准。提示函数中的 B 路径仅作为 RB+A 的后备，不新增 RB+B 组合，也不改变单独 B 行为。
+- 当四个方向值仍全部为旧版本完整默认映射时，自动迁移为新默认值；只要检测到任一方向为自定义值，就保留用户全部方向设置。
+- 暂时只开启 rbZoom 诊断类别，用于确认拦截钩子安装、实际消费路径和缩放边沿；不打开 panelQuickSelect 的高频诊断。
+- 更新 mod.info 版本号至 1.5.0.31。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSDebugLog.lua
+- 42/media/lua/client/GQSModOptions.lua
+- 42/media/lua/client/GQSPanelQuickSelect.lua
+- 42/media/lua/client/GQSRBZoom.lua
+- 42/media/lua/client/GQSRBZoom_Moodles.lua
+- 42/media/lua/shared/Translate/CN/UI_CN.txt
+- 42/media/lua/shared/Translate/CN/UI.json
+- 42/media/lua/shared/Translate/EN/UI_EN.txt
+- 42/media/lua/shared/Translate/EN/UI.json
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 静态对照 v1.5.0.23 与 v1.5.0.28，并核对本次源码差异、Lua 文件 BOM、JSON 翻译键、完整包/补丁包路径和 ZIP CRC。
+- 当前环境没有 Lua/Kahlua 解析器，无法执行游戏 Lua 语法加载，也没有进行游戏内测试。首次启动后需要从 [GQS RB Zoom] 日志确认 JoypadControllerData 钩子安装及 RB+Y/A 输入消费情况；日志中的“Zoom action executed”只证明缩放，不单独证明原版输入被拦截。
+
+v1.5.0.30（在原版手柄分派入口拦截 RB+A，2026-10-19）
+
+- 根据 v1.5.0.29 的实机日志确认：RB+A 缩放动作确实执行，但新增的 A 拦截没有命中，原版翻越/交互仍然发生。
+- 将 A 拦截移入 RB 组合键所属模块 `GQSRBZoom.lua`，改为包装 Build 42.21 实际使用的 `JoypadControllerData:onPressButton(button)`，在原版分派 A 之前消费输入；仅当 UI 焦点为空且 RB 先按、A 后按、RB+A 动作启用并满足世界操作条件时生效。
+- 若控制器分派类在模组文件加载时尚未可用，会在游戏生命周期事件及 OnTick 中重试安装。日志会明确记录拦截器安装成功和 A 输入被消费。
+- `GQSRBZoom.lua` 现有 RB+A 缩小视角轮询/缩放实现保持不变。`GQSPanelQuickSelect.lua` 恢复为 v1.5.0.28 内容，移除 v1.5.0.29 中未命中的 A 拦截尝试；RB+Y 的 v1.5.0.28 代码未改动。
+- 更新 mod.info 版本号至 1.5.0.30。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSRBZoom.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已检查本次与 v1.5.0.28 的源码差异、Lua 文件 UTF-8 无 BOM、JSON、ZIP 结构与 CRC。
+- 已对照 Build 42.21 的 JoyPadSetup 源码确认 `JoypadControllerData:onPressButton(button)` 是焦点为空时调用原版无焦点分派的入口；该源码参考链接见交付说明。
+- 当前环境没有可用的 Lua/Kahlua 解析器，未做 Lua 编译验证，也未进行游戏内测试。需在游戏中确认日志出现“Installed JoypadControllerData:onPressButton RB+A interceptor”及按 RB 后按 A 时的“Consumed native A...”记录，并确认没有翻越/开窗；还需回归单独 A、RB+Y 和 UI 焦点下的 A。
+
+v1.5.0.29（尝试拦截 RB+A 原版交互，已由 v1.5.0.30 替换，2026-10-19）
+
+- 曾尝试在 `GQSPanelQuickSelect.lua` 中包装全局/表级无焦点按键入口及 `ISButtonPrompt:onAPress`。
+- 用户实机确认该版仍会触发原版翻越等动作。由于实际游戏路径使用 `JoypadControllerData:onPressButton(button)` 实例方法，上述路径未能拦截该输入；本版本不作为有效修复，已由 v1.5.0.30 改正。
+- 本版本所改的 `GQSPanelQuickSelect.lua` A 拦截尝试不再保留；RB+Y 代码和 RB+A 原缩放逻辑按 v1.5.0.28 基线保留。
+
+v1.5.0.28（补充 RB+Y 原生背包行为的后备恢复，2026-10-19）
+
+- 根据 v1.5.0.27 的代码路径确认，`ISButtonPrompt:onYPress` 不是所有无焦点 Y 输入的必经入口；原版背包动作可能先于该钩子执行。
+- 在 `GQSPanelQuickSelect.lua` 增加独立的物理 RB/Y 按键顺序跟踪。RB 必须先按下，且当时处于世界焦点、背包与搜寻窗口均关闭、RB+Y 缩放动作启用，才会进入后备抑制。
+- 如果原版无焦点 Y 动作已经打开背包/搜寻窗口，后备逻辑会恢复 RB 按下时的窗口可见状态和焦点；不主动关闭用户在 RB 按下前已打开的窗口。
+- 保留原有 `ISButtonPrompt:onYPress` 与 UI 焦点钩子作为第一层拦截；本次后备路径用于处理它们未覆盖的原版无焦点输入。
+- 更新 mod.info 版本号至 1.5.0.28。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelQuickSelect.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已进行源码差异检查、UTF-8 无 BOM 检查、JSON/ZIP 结构与 CRC 检查。
+- 当前环境没有可用的 Lua/Kahlua 解析器，无法完成 Lua 编译验证，也未进行游戏内测试。需要在游戏中确认 RB 先按、再按 Y 时只缩放且不留下背包窗口；还需确认普通 Y、打开容器时 RB+方向键及分屏行为不变。
+
+v1.5.0.27（改用 ISButtonPrompt 类方法拦截 RB+Y，2026-10-19）
+
+- 根据 v1.5.0.26 的游戏日志，原版 JoyPadSetup 无焦点分派函数未暴露为可包装的全局/表方法；上一版钩子未安装，因此 RB+Y 仍会执行原版 Y 动作。
+- 参考 RB+方向键拦截 ISDPadWheels.onDisplay* 的做法，改为包装公开的 ISButtonPrompt:onYPress 类方法，在原版默认 Y 动作运行前消费 RB+Y。
+- 继续保留先按 RB、再按 Y 的组合条件和 RB 缩放处理；开发日志会分别记录钩子安装、Y 动作消费及未能安装时的原因。
+- 更新 mod.info 版本号至 1.5.0.27。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelQuickSelect.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已完成人工静态检查和 ZIP 结构/CRC 检查；当前环境没有 lua/luac 或 Lua 解析器，无法执行 Lua 语法检查，也无法进行游戏内测试。需以游戏日志中的“installed ISButtonPrompt:onYPress RB+Y interceptor”和“consumed ISButtonPrompt:onYPress...”确认该版本钩子实际安装与命中。
+
+v1.5.0.26（拦截无焦点时 RB+Y 触发的普通 Y 动作，2026-10-19）
+
+- 在原版手柄无焦点按键分派入口拦截 RB+Y 的 Y 按键，避免原版背包操作与 RB 缩放同时发生。
+- 优先包装无焦点按键处理函数；兼容可用的 JoypadSetup/JoyPadSetup 表入口及父级按键分派函数，并保留其他按键的原有处理。
+- 保留按下顺序限制：需先按 RB，再按 Y；开发测试期间继续开启 panelQuickSelect 与 rbZoom 日志，以确认拦截入口安装和组合键消费结果。
+- 更新 mod.info 版本号至 1.5.0.26。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelQuickSelect.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- v1.5.0.26 游戏内日志显示拟包装的 JoyPadSetup 全局分派函数未暴露，拦截器未安装；该尝试由 v1.5.0.27 改为包装 ISButtonPrompt:onYPress。
+
+v1.5.0.25（增加 RB+Y 与 Y 键动作诊断日志，2026-10-19）
+
+- 开启 panelQuickSelect 和 rbZoom 两类开发日志，供复现 RB+Y 时追踪普通 Y 动作是否被延迟或重放。
+- Y 按下沿记录当前 RB 组合状态、对应动作、控制器编号、世界焦点资格、RB/Y 实际按下状态及 Y 在 RB 按下时是否已处于按下状态。
+- RB 按下时记录 Y/A 状态；执行 RB+Y/A 时记录动作分派；Y 拓展记录组合键识别与普通 Y 抑制路径。
+- 本版增加诊断，不宣称已修复背包仍被打开的问题；需要根据下一次 console.txt 中的 [GQS PanelQuickSelect] 与 [GQS RB Zoom] 日志确认原版 Y 动作在哪条路径先执行。
+- 更新 mod.info 版本号至 1.5.0.25。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSDebugLog.lua
+- 42/media/lua/client/GQSRBZoom.lua
+- 42/media/lua/client/GQSPanelQuickSelect.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态核对诊断字段和日志分支，并检查 ZIP 结构及 CRC。
+- 当前环境没有 Lua/luac 语法检查器；本次尚未做游戏内复现测试。
+v1.5.0.24（扩展 RB 组合键并调整默认操作，2026-10-19）
+
+- RB+上/下默认切换上一个/下一个心情状态；RB+左/右默认缩小/放大视角。
+- 新增 RB+Y 与 RB+A 组合键，默认分别放大/缩小视角；Mod Options 中可单独设置为放大、缩小或不使用。
+- RB+Y 时抑制普通 Y 操作，避免该组合意外打开背包或触发 Y 键拓展。
+- 将方向键扩展保持为世界焦点操作；容器打开时继续由既有容器切换处理 RB+上下。
+- 对保存了旧版完整默认映射的配置自动迁移到新默认值；检测到自定义方向设置时保留原有设置。
+- 更新中英文 Mod Options 名称、说明和心情状态提示按键。
+- 更新 mod.info 版本号至 1.5.0.24。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSModOptions.lua
+- 42/media/lua/client/GQSRBZoom.lua
+- 42/media/lua/client/GQSRBZoom_Moodles.lua
+- 42/media/lua/client/GQSPanelQuickSelect.lua
+- 42/media/lua/shared/Translate/CN/UI_CN.txt
+- 42/media/lua/shared/Translate/CN/UI.json
+- 42/media/lua/shared/Translate/EN/UI_EN.txt
+- 42/media/lua/shared/Translate/EN/UI.json
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态核对 RB 组合输入顺序、配置映射、双语翻译键与历史设置迁移条件；完成 ZIP 结构和 CRC 检查。
+- 当前环境没有 Lua/luac 语法检查器；本次尚未进行游戏内测试。请实测移动时 RB+Y/A 缩放、RB+上下状态切换，以及打开容器时原有 RB+上下翻页。
+v1.5.0.23（优化心情状态工具提示扫描，2026-10-19）
+
+- 保留 RB+方向键逐帧边沿检测；触发时仍即时读取心情状态，因此按键响应和选择顺序不变。
+- 心情提示未显示时停止后台心情列表扫描；提示显示时改为每 6 个 tick 刷新一次状态与文字排版，最多约 0.1 秒的界面信息刷新间隔。
+- 提示透明度仍逐帧更新；保留选中状态消失时关闭提示、超时渐隐、原版悬停提示抑制与恢复、多玩家槽位处理。
+- 将原版悬停提示抑制状态检查提前，已抑制时跳过重复的 MoodlesUI 查询。
+- 更新 mod.info 版本号至 1.5.0.23。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSRBZoom_Moodles.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已检查改动差异、Lua 代码结构、ZIP 文件结构及 CRC。
+- 当前环境没有可用的 Lua/luac 语法检查器；本次尚未进行游戏内性能或功能测试。状态提示内容刷新现在有最多约 6 个 tick 的延迟，需在游戏中确认视觉跟随和多人分屏表现。
+v1.5.0.22（修复 CleanUI 下教学关打开搜寻容器时报错，2026-10-19）
+
+- 根据 Build 42.21.0 原版 Steps.lua:430 确认，教学回调会对 getPlayerLoot(0) 调用 setBlinkingContainer(true)。
+- CleanUI 的 42.19 分支重新创建 ISInventoryPage 类但未提供原版 setBlinkingContainer 方法，导致该教学回调调用 nil。
+- GQS 仅在运行时该方法缺失时补上最小兼容实现，保留教学流程状态字段；不覆盖原版或其他模组已有实现，也不修改 CleanUI Workshop 文件。
+- 更新 mod.info 版本号至 1.5.0.22。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelQuickSelect.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态对照原版 Steps.lua、原版 ISInventoryPage 与 CleanUI 42.19 覆盖文件，确认缺失方法与报错行一致；完成 Lua 编码、ZIP 结构和 CRC 检查。
+- 当前环境没有 Lua/luac 语法检查器，且尚未在游戏中验证；请在启用 GQS、Custom Gamepad UI、CleanUI 与 CleanUI Menu Support 时实测教学关 Y 操作。
+
+v1.5.0.21（修复教学关按 Y 打开背包时报错，2026-10-19）
+
+- 针对教学关原版 TutorialMessage 调用 openInventoryJoypad 时持续报错的问题，增加局部保护；仅捕获该已确认的教学背包回调错误，避免每帧弹出 Lua 错误窗口。
+- 捕获到该错误时改走模组现有的安全背包显示与手柄焦点设置流程，按 Y 仍可打开背包。
+- 教学模式识别增加 TutorialMessage 焦点兜底，确保 Y 组合键和长按增强在教学关被跳过，让教学输入保持原用途。
+- 更新 mod.info 版本号至 1.5.0.21。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelQuickSelect.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已从 console.txt 确认错误堆栈仅包含原版 Steps.lua:430 与 TutorialMessage.lua:66；补丁采用针对性保护并静态检查目标路径。
+- 完成 Lua 文件编码、ZIP 结构与 CRC 检查。当前环境没有 Lua/luac 语法检查器，也无法代替游戏内教学关实测；按 Y 打开背包和教学流程仍需在游戏中确认。
+v1.5.0.20（修复面板增强 Lua 文件无法加载，2026-10-19）
+
+- 移除 GQSPanelInfoEnhancement.lua 意外写入的 UTF-8 BOM，修复游戏启动时 Lua 编译失败及面板增强功能整体失效。
+- 更新 mod.info 版本号至 1.5.0.20。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelInfoEnhancement.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已核对全部 Lua 文件均无 UTF-8 BOM，并完成补丁/完整包结构与 CRC 检查。
+- 当前环境没有 Lua/luac 语法检查器；修复后仍需通过游戏启动与面板操作确认。
+
+v1.5.0.19（调整面板标题栏提示排版，2026-10-19）
+
+- RB 提示精简为“RB 切换面板区域”，移除方向键图标组，避免重复官方已有的操作引导。
+- RT 翻页提示改用已定义的翻页本地化键，修复游戏内显示原始键名的问题。
+- 加大标题栏操作提示组之间及组内图标/文字的间距，提升可读性。
+- 更新 mod.info 版本号至 1.5.0.19。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelInfoEnhancement.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 静态核对翻页本地化键与中英文定义一致，RB 组不再绘制方向键，提示间距已加大；补丁包和完整包 CRC/结构检查通过。
+- 环境没有 Lua/luac 语法检查器，未执行游戏内测试。
+
+v1.5.0.18（补全建造/合成面板手柄提示，2026-10-19）
+
+- 标题栏按顺序补全 RB+方向键“切换面板区域”、RT+上下“翻页”、X 收藏/取消收藏、Y 显示/隐藏全部配方或建筑版本、B 关闭面板提示；方向键和功能键优先使用游戏现有图标，缺少图标时用文字/箭头兜底。
+- 在建造/合成面板按 Y 调用原版过滤控件回调：合成切换“显示所有配方”，建造切换“显示所有建筑版本”，并同步勾选状态与列表刷新。
+- RB 提示使用“切换面板区域”措辞，因为原版 RB+方向键在这些窗口间移动手柄焦点；不将它描述为切换配方分类。
+- 更新中英文提示文本与 mod.info 版本号至 1.5.0.18；设置说明现涵盖技能经验提示、RT 翻页、X 收藏与 Y 显示全部筛选。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelInfoEnhancement.lua
+- 42/media/lua/shared/Translate/CN/UI.json
+- 42/media/lua/shared/Translate/CN/UI_CN.txt
+- 42/media/lua/shared/Translate/EN/UI.json
+- 42/media/lua/shared/Translate/EN/UI_EN.txt
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态检查 RB/RT/D-pad/X/Y/B 提示顺序、Y 对原版复选框回调的连接、建造“Show All Version”和合成“Show All Recipe”控件名称、JSON 翻译及 ZIP CRC/结构。
+- 当前环境没有 Lua/luac 语法检查器，未执行游戏内测试；两类面板的按键提示布局与 Y 实际切换仍需分别实机确认。
+
+v1.5.0.17（调整建造/合成翻页步长并支持分类列表，2026-10-19）
+
+- 建造与合成配方列表改为直接按列表索引移动 7 格，即跳过 7 项并选择第 8 项；与容器 RT+方向键翻页步长一致，边界自动收敛到首/末项。
+- 最左侧配方分类子面板（含“全部”）也支持先按住 RT 再按上/下，按相同步长切换分类并刷新配方。
+- 标题栏尝试使用 Joypad.Texture 提供的右扳机图标，并与 X 收藏图标及翻页文字一起显示；若当前游戏未暴露 RT 图标则保留 RT 文字提示，并记录诊断日志。
+- 更新中英文提示及 mod.info 版本号至 1.5.0.17。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelInfoEnhancement.lua
+- 42/media/lua/shared/Translate/CN/UI.json
+- 42/media/lua/shared/Translate/CN/UI_CN.txt
+- 42/media/lua/shared/Translate/EN/UI.json
+- 42/media/lua/shared/Translate/EN/UI_EN.txt
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态检查与容器相同的索引 ±7 步长、RT 先按顺序、分类列表子控件回调、标题栏图标候选和翻译 JSON；检查两个 ZIP 的 CRC/结构。
+- 当前环境没有 Lua/luac 语法检查器，未做游戏内测试。游戏是否提供右扳机贴图由运行日志记录；分类列表、合成和建造都需实机确认。
+
+v1.5.0.16（建造与合成面板快速翻页，2026-10-19）
+
+- 建造面板和合成面板均支持按住 RT 后按上/下方向键，每次跨过最多 7 个可选配方；到列表边界时停止。
+- 只有先按住 RT 再按方向键才会翻页；单独方向键仍由原版逐项选择，按住方向键不会重复跳页。
+- 翻页后同步更新选中配方、列表滚动位置和右侧配方详情。
+- 两个面板标题栏显示 RT+上下翻页提示；有配方可收藏时，与 X 收藏/取消收藏提示并排显示。
+- 新增中英文提示文本；更新 mod.info 版本号至 1.5.0.16。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelInfoEnhancement.lua
+- 42/media/lua/shared/Translate/CN/UI.json
+- 42/media/lua/shared/Translate/CN/UI_CN.txt
+- 42/media/lua/shared/Translate/EN/UI.json
+- 42/media/lua/shared/Translate/EN/UI_EN.txt
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态核对技能/容器翻页的按键顺序约定、配方列表焦点钩子、可选配方跳过分类标题、详情同步回调和标题栏绘制；检查翻译 JSON 格式及两个 ZIP 的 CRC/结构。
+- 当前环境未安装 Lua/luac 语法检查器，且未执行游戏内测试；建造与合成面板仍需分别实机确认。
+
+v1.5.0.15（修复配方收藏详情即时刷新，2026-10-19）
+
+- 修复建造/合成面板按 X 收藏后，详情区收藏标记仍需上下移动才刷新的问题。
+- 收藏状态改变后，先通过原版配方选择回调清空当前详情配方，再恢复当前配方，强制刷新详情而不移动焦点或选中项。
+- 增加详情刷新成功/失败日志，便于确认运行路径。
+- 更新 mod.info 版本号至 1.5.0.15。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelInfoEnhancement.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已查看游戏 console.txt：X 收藏状态切换有日志，相关片段没有 GQS Lua 错误；已静态检查详情刷新回调，并检查两个 ZIP 的 CRC 与结构。未执行游戏内复测；当前环境没有可用 Lua/luac 语法检查器。
+
+v1.5.0.14（技能面板 RT+方向键翻页，2026-10-19）
+
+- 技能面板支持按住 RT 后按上/下方向键，每次跳过 7 个技能条目并滚动到目标技能。
+- 单独按上/下仍沿用原版逐项移动；先按方向键再按 RT 不会转成翻页，松开方向键后可再次操作。
+- 翻页后同步刷新技能焦点和技能提示；本次仅接入技能面板，合成与建造列表翻页暂未实现。
+- 更新 mod.info 版本号至 1.5.0.14。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelInfoEnhancement.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态检查按键顺序判定、技能索引边界、原版列表滚动/提示刷新调用，并检查两个 ZIP 的 CRC 与结构；未执行游戏内测试。当前环境没有可用 Lua/luac 语法检查器。
+v1.5.0.13（调整联机收藏物品转移方向限制，2026-10-19）
+
+- 调整联机 X 转移的收藏物品规则：允许转入角色自身库存及随身容器，阻止转入搜寻/战利品容器。
+- 修正 v1.5.0.12 将随身容器误判为禁止目标的问题；单机逻辑保持不变。
+- 更新 mod.info 版本号至 1.5.0.13。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSGamepadXContainerTransfer.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态检查转移方向与收藏状态条件，并检查 ZIP CRC/结构；未执行游戏内测试。当前环境没有可用 Lua/luac 语法检查器。
+v1.5.0.12（修复联机 X 转移收藏物品限制，2026-10-19）
+
+- 修复联机模式下通过 X 快速/长按转移时，收藏物品可能被移动到角色库存或随身容器的问题。
+- 转移前识别联机状态、角色所属容器和物品收藏标记；联机时拒绝向角色自身库存及随身容器转移收藏物品。
+- 单机转移规则保持不变；穿戴物、腰带挂载物和背部武器的既有转移流程保持不变。
+- 更新 mod.info 版本号至 1.5.0.12。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSGamepadXContainerTransfer.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态检查联机收藏物品过滤条件、与 1.4.6.4 转移逻辑的差异，并检查 ZIP CRC/结构；未执行游戏内测试。当前环境没有可用 Lua/luac 语法检查器。
+v1.5.0.11（恢复车辆与动物原版轮盘优先级，2026-10-19）
+
+- 修复拆分版上方向轮盘扩展覆盖车辆和动物原版轮盘的问题。
+- 在 D-pad Up 处理时检测当前乘坐车辆、可交互车辆和可交互动物；命中时保留原版轮盘，并跳过 GQS/CustomGamepadUI 自定义轮盘覆盖。
+- 保持“放下背包”和相邻格互动选项仅在没有车辆或动物交互目标时显示。
+- 更新 mod.info 版本号至 1.5.0.11。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSTileRadialMenuFix.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态对照合并前 SWTileRadialMenu.lua 的车辆/动物优先判断，并进行 ZIP CRC 与结构检查；未执行游戏内测试。当前环境没有可用 Lua/luac 语法检查器。
+v1.5.0.10（教学模式屏蔽 Y 组合快捷键，2026-10-19）
+
+- 教学模式下明确禁用 GQS 的 Y+D-pad、Y+摇杆面板快捷操作和长按手势；Y 按键本身仍即时交由原版处理。
+- 增加教学模式识别诊断日志，进入该模式时记录一次“Tutorial mode detected”，便于确认运行中的 Lua 是否已加载新版。
+- 更新 mod.info 版本号至 1.5.0.10。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelQuickSelect.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态检查教学模式旁路与原版 Y 事件路径，并检查 ZIP CRC/结构；未执行游戏内测试。当前环境没有可用 Lua/luac 语法检查器。
+v1.5.0.9（教学模式下恢复原版 Y 输入，2026-10-19）
+
+- 教学模式中不再拦截或延迟 Y 键，直接交给原版处理，避免长按 Y 手势逻辑与教学步骤的持续输入检查交错。
+- 更新 mod.info 版本号至 1.5.0.9。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelQuickSelect.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态确认教学模式会跳过 Y 拦截分支，并检查 ZIP 结构及完整性；没有 Lua 语法检查器，未做游戏内复测。
+v1.5.0.8（即时刷新配方详情收藏标记，2026-10-19）
+
+- 修复按 X 收藏/取消收藏后，右侧配方详情区域的收藏标记未即时刷新的问题。
+- 在收藏状态更新后复用原版手柄切换配方所用的列表选择回调，立即刷新当前配方详情，不移动焦点或选中项。
+- 更新 mod.info 版本号至 1.5.0.8。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelInfoEnhancement.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已对照 Build 42 原版 ISRecipeScrollingListBox 的手柄上下选择回调确认刷新入口；完成静态检查与 ZIP 完整性检查，未做游戏内测试。
+v1.5.0.7（修复配方收藏报错并恢复模组名称，2026-10-19）
+
+- 修复按 X 收藏/取消收藏配方时因清空列表行高度后调用 ensureVisible 导致的 Lua 报错；收藏切换不再改写列表布局数据。
+- 将模组显示名称和中文描述恢复为 1.4 系列原文，并保留独立版所需的 CustomGamepadUI 前置关系。
+- 新增 Build 42 本地化元数据：简体中文游戏显示原中文描述，英文游戏显示对应英文描述。
+- 更新 mod.info 版本号至 1.5.0.7。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelInfoEnhancement.lua
+- 42/media/lua/shared/Translate/CN/Mod.json
+- 42/media/lua/shared/Translate/EN/Mod.json
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态检查 Lua 改动、JSON 语法、ZIP CRC 与目录结构；未在游戏内运行验证。
+v1.5.0.6（面板增强：配方收藏快捷操作，2026-10-19）
+
+- 将“启用面板信息增强”保留为单一总开关，并更新中英文说明，明确包括技能下一级提示及建造/手作面板配方收藏。
+- 在建造面板和手作面板的手柄配方列表中，按 X 收藏或取消收藏当前选中配方；复用游戏原有角色收藏数据，因此收藏状态也用于原版收藏分类。
+- 配方列表获得手柄焦点且选中有效配方时，在面板标题栏居中显示 X 收藏/取消收藏提示；不拦截其他界面中的 X 输入。
+- 更新 mod.info 版本号至 1.5.0.6。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSPanelInfoEnhancement.lua
+- 42/media/lua/shared/Translate/CN/UI.json
+- 42/media/lua/shared/Translate/CN/UI_CN.txt
+- 42/media/lua/shared/Translate/EN/UI.json
+- 42/media/lua/shared/Translate/EN/UI_EN.txt
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态检查接口调用、开关门控、翻译键、JSON 解析、ZIP CRC 和目录结构；本环境没有 Lua 语法检查器，未做游戏内测试。
+v1.5.0.5（调整模组设置分组，2026-10-19）
+
+- 将“容器内操作优化”标题改为【容器内操作优化】；在翻页方案前增加“RT+上下翻页”分组标题。
+- 将 RT+B 焦点恢复设置移至【按键功能拓展】区，并放在面板增强分隔线之前。
+- 新增【面板增强】分组，将健身面板增强与面板信息增强归入该分组。
+- 混合液体自动饮用和 Select 轮盘快捷入口移到面板增强区之后。
+- 更新 mod.info 版本号至 1.5.0.5。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSModOptions.lua
+- 42/media/lua/shared/Translate/CN/UI.json
+- 42/media/lua/shared/Translate/CN/UI_CN.txt
+- 42/media/lua/shared/Translate/EN/UI.json
+- 42/media/lua/shared/Translate/EN/UI_EN.txt
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态检查布局调用顺序、翻译键与文件编码，并验证 ZIP 结构和 CRC；未进行游戏内测试。
+Gamepad QoL Suite 更新日志
+=========================
+
+v1.5.0.4（修复上方向键轮盘打开时报错，2026-10-19）
+
+- 在 GQSTileRadialMenuFix.lua 中补齐 rightRadial 分类日志函数；上方向键轮盘新增丢弃背包动作时此前调用了未定义的 debugLog，触发 “Object tried to call nil” 并中断轮盘。
+- 更新 mod.info 版本号至 1.5.0.4。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSTileRadialMenuFix.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态核对报错调用点与日志函数定义，并确认 Lua 文件无 UTF-8 BOM；未进行游戏内测试。
+v1.5.0.3（恢复上方向键轮盘的丢弃背包动作，2026-10-19）
+
+- 将旧版 SWTileRadialMenu 的 DropWornBag 功能迁入 GQSTileRadialMenuFix.lua。角色穿着未锁定的背包时，上方向键情境轮盘重新显示“丢弃背包”；执行时会再次确认该物品仍穿在背部。
+- 更新 mod.info 版本号至 1.5.0.3。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSTileRadialMenuFix.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态核对旧版菜单条件、回调参数和当前独立扩展；未进行游戏内测试。
+v1.5.0.2（修复 21 个 Lua 脚本无法加载，2026-10-19）
+
+- 移除全部 21 个 GQS Lua 文件开头的 UTF-8 BOM。Build 42 Lua 加载器将 BOM 首字节误解析为非法 token，导致 21 个脚本均报 Index 65022 out of bounds，GQS 功能无法加载。
+- 更新 mod.info 版本号至 1.5.0.2。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQSContainerCycleFix.lua
+- 42/media/lua/client/GQSContainerPageNavigation.lua
+- 42/media/lua/client/GQSContainerSwitchModes.lua
+- 42/media/lua/client/GQSDebugLog.lua
+- 42/media/lua/client/GQSFitnessUIEnhancement.lua
+- 42/media/lua/client/GQSFixScrollingListBoxJoypadB.lua
+- 42/media/lua/client/GQSGamepadDragTransfer.lua
+- 42/media/lua/client/GQSGamepadXContainerTransfer.lua
+- 42/media/lua/client/GQSMixedLiquidAutoDrink.lua
+- 42/media/lua/client/GQSModOptions.lua
+- 42/media/lua/client/GQSMultiSelectStandalone.lua
+- 42/media/lua/client/GQSNameColumnPersistence.lua
+- 42/media/lua/client/GQSPanelInfoEnhancement.lua
+- 42/media/lua/client/GQSPanelLayout.lua
+- 42/media/lua/client/GQSRadialRightExtension.lua
+- 42/media/lua/client/GQSRBZoom.lua
+- 42/media/lua/client/GQSRBZoom_Moodles.lua
+- 42/media/lua/client/GQSRtBFocusReset.lua
+- 42/media/lua/client/GQSSelectAndStartFix.lua
+- 42/media/lua/client/GQSTileRadialMenuFix.lua
+- 42/media/lua/client/GQSUICleanupExtension.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态确认 21 个 GQS Lua 文件均无 UTF-8 BOM，并通过 ZIP 解压与 CRC 检查；未进行游戏内测试。
+v1.5.0.1（修复启动时翻译 JSON 解析崩溃，2026-10-19）
+
+- 移除中文与英文 UI.json 文件开头的 UTF-8 BOM；Build 42 的 JSON 翻译解析器因此前在首字符处抛出 JSONException，导致主线程启动失败。
+- 更新 mod.info 版本号至 1.5.0.1。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/shared/Translate/CN/UI.json
+- 42/media/lua/shared/Translate/EN/UI.json
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已通过 JSON 解析并检查两个文件无 UTF-8 BOM；未进行游戏内启动测试。
+v1.5.0（拆分为 CustomGamepadUI 附加模组，2026-10-19）
+
+- 将 Gamepad QoL Suite 独有功能从上游 SW* 脚本副本拆为 GQS* 文件，并新增 require=CustomGamepadUI 依赖；不再在 GQS 包内分发 CustomGamepadUI 的原始脚本。
+- 对 SWModOptions、SWPanelOverride、SWSelectAndStart、SWTileRadialMenu、SWUICleanup 的原有扩展改为 GQSModOptions、GQSPanelLayout、GQSSelectAndStartFix、GQSTileRadialMenuFix、GQSUICleanupExtension 五个独立实现/运行时扩展。
+- 删除与上游内容完全相同的 SWFocusCombat、SWRackReload、SWPatch_ISBarricadeAction、重复图标和英文菜单翻译文件；由所需前置模组提供原版功能。
+- GQS 设置继续保存在 GamepadQoLSuite 独立选项组；读取旧 GQS 选项并将原属于 CustomGamepadUI 的设置迁移回上游选项组（仅在上游尚无已保存值时）。
+- 清理英文翻译中覆盖上游 UI_CGUI 文案的条目；保留本模组新增的英文文案及中文本地化。
+- 更新 mod.info 版本为 1.5.0，并要求 CustomGamepadUI。
+
+本版模组文件清单
+
+- 42/media/lua/client/GQSContainerCycleFix.lua
+- 42/media/lua/client/GQSContainerPageNavigation.lua
+- 42/media/lua/client/GQSContainerSwitchModes.lua
+- 42/media/lua/client/GQSDebugLog.lua
+- 42/media/lua/client/GQSFitnessUIEnhancement.lua
+- 42/media/lua/client/GQSFixScrollingListBoxJoypadB.lua
+- 42/media/lua/client/GQSGamepadDragTransfer.lua
+- 42/media/lua/client/GQSGamepadXContainerTransfer.lua
+- 42/media/lua/client/GQSMixedLiquidAutoDrink.lua
+- 42/media/lua/client/GQSModOptions.lua
+- 42/media/lua/client/GQSMultiSelectStandalone.lua
+- 42/media/lua/client/GQSNameColumnPersistence.lua
+- 42/media/lua/client/GQSPanelInfoEnhancement.lua
+- 42/media/lua/client/GQSPanelLayout.lua
+- 42/media/lua/client/GQSPanelQuickSelect.lua
+- 42/media/lua/client/GQSRBZoom.lua
+- 42/media/lua/client/GQSRBZoom_Moodles.lua
+- 42/media/lua/client/GQSRadialRightExtension.lua
+- 42/media/lua/client/GQSRtBFocusReset.lua
+- 42/media/lua/client/GQSSelectAndStartFix.lua
+- 42/media/lua/client/GQSTileRadialMenuFix.lua
+- 42/media/lua/client/GQSUICleanupExtension.lua
+- 42/media/lua/server/GQS_MixedLiquidAutoDrinkServer.lua
+- 42/media/lua/shared/Translate/CN/UI.json
+- 42/media/lua/shared/Translate/CN/UI_CN.txt
+- 42/media/lua/shared/Translate/EN/UI.json
+- 42/media/lua/shared/Translate/EN/UI_EN.txt
+- 42/media/ui/icon_fitness_dumbbell.png
+- 42/media/ui/icon_skill_book.png
+- 42/mod.info
+- CHANGELOG_zh-CN.txt
+- common/README.txt
+
+升级时从旧版 GamepadQoLSuite 文件夹删除以下旧路径（只处理 GamepadQoLSuite 文件夹，不要删除 CustomGamepadUI 文件）：
+- 42/media/lua/client/00_GamepadMultiSelectStandalone.lua
+- 42/media/lua/client/GQS_DebugLog.lua
+- 42/media/lua/client/GQS_FixScrollingListBoxJoypadB.lua
+- 42/media/lua/client/GQS_PanelInfoEnhancement.lua
+- 42/media/lua/client/GQS_Z_ContainerPageNavigation.lua
+- 42/media/lua/client/SWContainerCycleFix.lua
+- 42/media/lua/client/SWContainerSwitchModes.lua
+- 42/media/lua/client/SWFocusCombat.lua
+- 42/media/lua/client/SWGamepadDragTransfer.lua
+- 42/media/lua/client/SWGamepadXContainerTransfer.lua
+- 42/media/lua/client/SWModOptions.lua
+- 42/media/lua/client/SWNameColumnPersistence.lua
+- 42/media/lua/client/SWPanelOverride.lua
+- 42/media/lua/client/SWRackReload.lua
+- 42/media/lua/client/SWSelectAndStart.lua
+- 42/media/lua/client/SWTileRadialMenu.lua
+- 42/media/lua/client/SWUICleanup.lua
+- 42/media/lua/client/ZZ_GQSFitnessUIEnhancement.lua
+- 42/media/lua/client/ZZ_GQSMixedLiquidAutoDrink.lua
+- 42/media/lua/client/ZZ_GQSRadialRightExtension.lua
+- 42/media/lua/client/ZZ_GQSRBZoom.lua
+- 42/media/lua/client/ZZ_GQSRBZoom_Moodles.lua
+- 42/media/lua/client/ZZ_GQSRtBFocusReset.lua
+- 42/media/lua/shared/SWPatch_ISBarricadeAction.lua
+- 42/media/lua/shared/Translate/EN/ContextMenu.json
+- 42/media/lua/shared/Translate/EN/ContextMenu_EN.txt
+- 42/media/lua/shared/Translate/CN/ContextMenu.json
+- 42/media/lua/shared/Translate/CN/ContextMenu_CN.txt
+- 42/media/ui/icon_glass_broken.png
+- 42/media/ui/icon_key.png
+- 42/media/ui/icon_light_bulb.png
+- 42/media/ui/icon_metal_bar.png
+- 42/media/ui/icon_plank.png
+- 42/media/ui/icon_sheet.png
+- 42/media/ui/icon_sheet_metal.png
+- 42/media/ui/icon_water_bottle.png
+- 42/media/ui/icon_water_drop.png
+
+验证说明
+- 静态检查依赖 ID、文件清单、翻译键、ZIP CRC 与路径结构。
+- 未在游戏内验证本次拆分版；当前环境无 Lua 语法检查器，静态检查不能替代 B42 游戏测试。
+
+v1.4.6.4（修复联机自动饮水触发，2026-10-19）
+
+水酒混合液自动饮用
+- 根据联机日志确认客户端脚本加载但没有发出饮用请求；新增 OnPlayerUpdate 联机兜底检查，按秒检查本地玩家的自动饮水设置、口渴值及合格混合液，并向服务器请求即时饮用。
+- 移除服务器对 IsoPlayer:isAutoDrink() 的额外判断，避免把客户端自动饮水状态/钩子状态误当成设置开关；客户端仍检查游戏自动饮水设置，服务器继续校验容器和角色状态。
+- 服务端新增请求处理器加载及收到请求日志，便于从房主/服务器日志确认网络路径。
+- mod.info 版本号更新为 1.4.6.4。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/ZZ_GQSMixedLiquidAutoDrink.lua
+- 42/media/lua/server/GQS_MixedLiquidAutoDrinkServer.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已核对客户端联机兜底触发、请求发送、服务端请求处理器加载与服务器端资格校验。
+- 尚未在 Build 42.21.0 游戏内/联机实测；静态检查不能替代实际游戏验证。
+
+
+v1.4.6.3（修复联机混合液自动饮用，2026-10-19）
+
+水酒混合液自动饮用
+- 修复联机中客户端直接调用 DrinkFluid 后被服务器状态覆盖的问题：客户端现在通过 LuaNet 请求服务器即时处理饮用，避免使用计时动作和进度条。
+- 新增服务器端请求处理脚本；服务器按玩家库存中的物品 ID 重新核验混合液、水占比严格大于 50%、污染/毒性、容器偏好、角色口渴值和饮用请求间隔，再执行 DrinkFluid 并同步物品字段。
+- 开发阶段启用 mixedAutoDrink 分类日志，记录请求发送、服务器接受/拒绝与失败信息。
+- mod.info 版本号更新为 1.4.6.3。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQS_DebugLog.lua
+- 42/media/lua/client/ZZ_GQSMixedLiquidAutoDrink.lua
+- 42/media/lua/server/GQS_MixedLiquidAutoDrinkServer.lua（新增）
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 静态核对客户端命令、服务器端重复校验、即时 DrinkFluid 调用及物品字段同步；已检查 ZIP CRC 与结构。
+- 服务器端 Lua 必须随模组在朋友的联机服务器/房主端加载。尚未在 Build 42.21.0 联机游戏内实测；静态检查不能替代实际联机测试。
+
+
+v1.4.6.2（取消混合液自动饮用的最低容量限制，2026-10-19）
+
+水酒混合液自动饮用
+- 将候选判定改为混合液中 Water 的实际占比严格大于 50%，不再要求容器至少有 120 ml；恰好 50% 不会自动饮用。
+- 每次即时饮用最多 120 ml；容器剩余量不足 120 ml 时会饮用剩余部分。
+- 仍排除污染、有毒或对此容器手动关闭自动饮用的混合液。
+- mod.info 版本号更新为 1.4.6.2。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/ZZ_GQSMixedLiquidAutoDrink.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已核对 Build 42 FluidContainer 提供 getRatioForFluid(Fluid) 与 Water 流体常量，并静态检查新阈值与饮用量逻辑。
+- 已检查 ZIP CRC 与结构；未在 Project Zomboid 内实测。静态检查不能替代游戏测试。
+
+
+v1.4.6.1（混合液自动饮用改为即时饮用，2026-10-19）
+
+水酒混合液自动饮用
+- 混合液自动饮用改为直接调用角色 DrinkFluid，并同步物品字段；保留每次最多 120 ml 的自动饮用量。
+- 移除 ISDrinkFluidAction 计时动作路径，混合液自动饮用不再播放动作或显示进度条，饮用效果沿用原版 DrinkFluid。
+- mod.info 版本号更新为 1.4.6.1。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/ZZ_GQSMixedLiquidAutoDrink.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态核对混合液与原版 ISDrinkFluidAction 最终都调用 IsoGameCharacter:DrinkFluid(item, percentage, useUtensil)，并保留原动作脚本的 syncItemFields 联机字段同步步骤。
+- 已检查 ZIP CRC 与文件清单；未在 Project Zomboid 内实测。静态检查不能证明游戏内表现或联机同步完全符合预期。
+
+
+v1.4.6（允许水酒混合液自动饮用，2026-10-19）
+
+水酒混合液自动饮用
+- Mod 设置“其他”新增“允许水酒混合液自动饮用”，默认开启。原版在 Build 42.19 将候选判定从 isWaterSource 收紧为 isWaterOnlySource，混合容器因此不再自动饮用。
+- 开启后，在原版自动饮水规则之外，允许水为主要液体、达到 120 ml 且未污染/无毒的混合容器自动饮用；普通纯水继续由原版逻辑处理。
+- 物品“液体”子菜单增加按容器关闭/重新启用混合液自动饮用的选项，偏好保存在该物品 ModData，并在联机中同步。
+- mod.info 版本号更新为 1.4.6。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/SWModOptions.lua
+- 42/media/lua/client/ZZ_GQSMixedLiquidAutoDrink.lua（新增）
+- 42/media/lua/shared/Translate/CN/UI_CN.txt
+- 42/media/lua/shared/Translate/CN/UI.json
+- 42/media/lua/shared/Translate/EN/UI_EN.txt
+- 42/media/lua/shared/Translate/EN/UI.json
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已对照 Build 42.21.0 官方 FluidContainer API 与 vanilla ISFluidContainerMenu.lua：自动喝水资格使用 isWaterOnlySource，且“液体”菜单的原版自动喝开关受全局设置控制。
+- 已通过中英文 JSON 解析、ZIP CRC 与结构检查；补丁包清单已确认只包含本次改动文件。当前环境没有 lua/luac/luajit 或 Lua 解析器，因此未完成 Lua 语法解析。尚未经过游戏内自动饮水/联机实测；静态检查不能替代游戏测试。
+
+
+v1.4.5（分屏容器布局与分隔线修复，2026-10-19）
+
+分屏容器独立布局
+- Mod 设置新增“分屏模式容器 UI 总宽度”和“分屏模式容器 UI 高度”；宽度默认 100%，高度默认 50%。分屏容器高度同时应用于角色物品栏与搜寻栏，按每位玩家自己的视口百分比计算。
+- 单人仍使用原有宽度、高度和布局选项；分屏与单人的名称列、类型列和重量列分隔线分别保存于 GamepadQoLSuite_NameColumnWidth.txt。旧版单人数据键仍可读取。
+- 修复 CleanUI 对玩家 2 提前拦截鼠标回调导致无法拖动容器分隔线的问题。仅在检测到分隔线命中或已有分隔线拖动时继续处理该玩家的拖动回调。
+- mod.info 版本号更新为 1.4.5。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/SWModOptions.lua
+- 42/media/lua/client/SWPanelOverride.lua
+- 42/media/lua/client/SWNameColumnPersistence.lua
+- 42/media/lua/shared/Translate/CN/UI_CN.txt
+- 42/media/lua/shared/Translate/CN/UI.json
+- 42/media/lua/shared/Translate/EN/UI_EN.txt
+- 42/media/lua/shared/Translate/EN/UI.json
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 静态检查包括 Lua 语法解析（如本机存在解析器）、本地化文件解析、ZIP CRC 与压缩包目录检查。
+- 尚未经过 Build 42.21.0 游戏内双人分屏实测；静态检查不能替代游戏内验证。
+
+
+v1.4.4.3（修复 RB 状态信息在双人分屏中的横向定位，2026-10-19）
+
+RB + 左右状态信息
+- 原先状态图标横坐标按全局屏幕宽度计算，玩家 0 在左侧分屏操作时，提示仍锚定到整屏最右侧，落入玩家 1 的视口。
+- 现在根据玩家编号读取对应屏幕区域的左边界、上边界、宽度和高度；图标锚点与信息面板的尺寸、位置和边界裁切均按该玩家视口计算。
+- rbMoodles 面板定位日志增加当前玩家视口数据，方便复测双人分屏。
+- mod.info 版本号更新为 1.4.4.3。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/ZZ_GQSRBZoom_Moodles.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已静态核对 Build 42 的 getPlayerScreenLeft/Top/Width/Height 用法和单人全屏回退路径；ZIP CRC 与结构将在打包时检查。
+- 尚未经过游戏内双人分屏实测；当前环境没有可用的 luac/Lua 语法解析器。
+
+v1.4.4.2（修复 Start 模拟双击无法识别 CleanUI 堆叠行，2026-10-19）
+
+Start 模拟双击
+- 根据当前启用的 CleanUI 42.19 行构造代码确认：每个物品堆叠的首个可见行是包含 items 的 Lua 表，不是 InventoryItem 实例；1.4.2 只接受 InventoryItem，导致常见的堆叠首行被错误跳过。
+- 现在识别 CleanUI 堆叠行并解析其真实物品，同时继续排除 type 为 separator 的“已装备物品”等标题行，避免旧报错复发。
+- mod.info 版本号更新为 1.4.4.2，作为 1.4.4.1 的兼容性热修复。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/SWSelectAndStart.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已对照用户本机 CleanUI 42.19 的渲染与堆叠数据结构，并确认 doubleClickWithStart 当前为开启状态；ZIP CRC 与结构将在打包时检查。
+- 尚未经过游戏内 Start 双击实测；当前环境无可用 luac/Lua 语法解析器。
+
+v1.4.4.1（修复分屏手柄方向键异常，2026-10-17）
+
+手柄径向菜单
+- 根据联机日志发现，游戏原版 `ISDPadWheels.onDisplayUp` 在调用 `menu:clear()` 前未检查径向菜单实例是否存在；分屏本地玩家菜单尚未就绪时会产生 `attempted index: clear of non-table: null`。
+- GQS 在回退调用原版处理函数前检查手柄数据、玩家对象与径向菜单；尚未就绪时跳过该次回调，避免重复 Lua 异常。
+- 将 mod.info 版本号更新为 1.4.4.1。本次为 1.4.4 的兼容性 bug 修复，使用四段版本号标记热修复，不增加新功能线。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/SWTileRadialMenu.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 根据用户提供的 2026-10-17 DebugLog 定位；静态 Lua 语法、ZIP CRC 与目录结构将在打包时检查。尚未经过新一轮游戏内联机分屏测试。
+
+v1.4.4（修复手柄技能提示框显示，2026-10-17）
+
+技能面板信息
+- 根据上一版补丁的 Build 42.21.0 测试日志确认，上下方向键回调已触发，并能正确取得选中技能的名称、等级和索引，但游戏画面仍未显示提示框。
+- 保持 joypad 焦点位于 ISCharacterInfo 且当前技能条为 barWithTooltip 时，阻止 ISSkillProgressBar:render() 清除该提示框。
+- 切换选中技能、退出面板或关闭面板信息增强时仍清除提示框；鼠标操作保留原版行为。
+- mod.info 版本号更新为 1.4.4。按常见三段式版本规则，本次为同一 1.4 功能线的 bug 修复，因此递增补丁号。
+
+本次更新改动文件
+- 42/mod.info
+- 42/media/lua/client/GQS_PanelInfoEnhancement.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 用户提供的 Build 42.21.0 日志确认技能选择回调正常，并记录到具体技能等级；提示框保留修复尚未经过新一轮游戏内测试。
+- 尚未进行 Lua/luac 编译检查；ZIP 完整性与目录结构将在打包时检查。
+
+v1.4.3（技能面板手柄回调修复，2026-10-17）
+
+面板信息与手柄焦点诊断
+- 保留并确认 panelInfo 日志分类在开发测试阶段默认开启。
+- 技能面板脚本加载时记录初始化状态；共享日志器尚未加载时回退到控制台输出。
+- 根据 Build 42.21.0 游戏日志，确认手柄焦点属于 ISCharacterInfo 父面板，技能选择由 progressBars[joypadIndex] 管理，而不是技能条自身持有焦点。
+- 改为挂接 ISCharacterInfo:onJoypadDirUp/Down；原版方向键回调执行后，对当前选中技能条生成原版等级提示，并记录方向、索引、技能名和等级。
+- UI 类不可用时按间隔重试安装；开发阶段 panelInfo 日志类别保持默认开启。
+
+本次更新改动文件
+- 42/media/lua/client/GQS_PanelInfoEnhancement.lua
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已检查 mod.info 的 ID、版本和所在路径，确认面板 Lua 路径存在；日志 API 名称一致且 panelInfo 默认开启。
+- 将检查 ZIP CRC、结构和翻译 JSON；当前环境未发现可用的 Lua/luac 语法检查器，因此不能报告 Lua 编译检查通过。
+- 后续 Build 42.21.0 日志确认方向键选择回调确实触发并获得技能数据；但画面仍未出现提示框，修复见 v1.4.4。
+
+v1.4.3（面板信息增强开发版，基于用户上传的 v1.4.2）
+
+面板信息增强
+- 新增 42/media/lua/client/GQS_PanelInfoEnhancement.lua：当前阶段为技能面板手柄焦点显示原版下一级技能方块提示。
+- 复用 ISSkillProgressBar:updateTooltip()，目标为当前等级的下一个等级方块，保留原版经验进度、经验倍率、技能说明与等级说明。
+- 新增 Mod Options「面板信息增强」开关，默认启用；未来面板选中条目按 X 收藏等功能规划放入同一模块，本版本尚未实现。
+- 新增 panelInfo 日志分类，开发阶段默认启用，游戏内确认后应在正式发布版关闭。
+
+本版本改动文件
+- 42/mod.info
+- 42/media/lua/client/GQS_PanelInfoEnhancement.lua（新增）
+- 42/media/lua/client/SWModOptions.lua
+- 42/media/lua/client/GQS_DebugLog.lua
+- 42/media/lua/shared/Translate/CN/UI_CN.txt
+- 42/media/lua/shared/Translate/CN/UI.json
+- 42/media/lua/shared/Translate/EN/UI_EN.txt
+- 42/media/lua/shared/Translate/EN/UI.json
+- CHANGELOG_zh-CN.txt
+
+验证说明
+- 已进行文件结构、翻译 JSON、ZIP 完整性与 Lua 基础静态检查。
+- 尚未在 Project Zomboid Build 42.21.0 内实测；尤其需要确认当前版本技能条是否直接持有 joypad focus。若游戏实际把焦点放在父级控件，本开发版日志将帮助确认焦点结构并继续修正。
+
+v1.4.2（修复 Start 双击库存分组标题导致报错）
+
+Select / Start 双击
+- 修复对背包中“已装备物品”等分组标题行按 Start 时，错误地将标题行的首个子物品传入 doContextualDblClick() 的问题。
+- 现在仅当当前选中行本身是 InventoryItem 时才执行 Start 双击；非物品标题行不触发双击，也不会尝试调用 CleanUI 的 doContextualDblClick()。
+- 增加对 inventoryPane、items、joyselection 及最终目标物品的基本有效性检查，避免无效选中状态导致调用。
+- 保留真实物品上的 Start 双击行为，不修改 CleanUI 或原版文件。
+- 修改文件：SWSelectAndStart.lua。
+- 修改文件：42/mod.info（版本号更新为 1.4.2）。
+
+验证说明
+- 已静态检查修改前后输入分支、InventoryItem 类型判断、Lua 代码块结构及 ZIP 路径/完整性。
+- 当前环境未启动 Project Zomboid，尚未进行游戏内实测。请优先复测：选中“已装备物品”标题按 Start 不报错；选中实际武器/衣物按 Start 仍能双击；普通鼠标双击行为不受影响。
+
+v1.4.1（为 RT + 上下容器翻页添加可选方案）
+
+容器物品选择 / RT + 上下翻页
+- 在 Mod Options「容器内操作优化」中新增“RT + 上下容器翻页”设置组与“翻页方案”选项。
+- 方案列表第一项为默认：固定跳过 7 个物品；例如从第 1 项按 RT + 下会选中第 8 项，继续按会选中第 15 项。
+- 固定跳跃会自动限制在列表开头/末尾，不循环跳转；目标项通过原版 ensureVisible() 定位，列表和滚动条随选中项滚动。
+- 第二项保留 v1.4.0 的可视区域翻页方案：先跳至当前可见边缘，再按可见行数逐页移动。
+- 新设置通过 GamepadQoLSuiteOptions.containerPageNavMode 提供给翻页脚本，默认值为 1；已有 v1.4.0 安装升级后也会默认采用固定跳跃，除非玩家主动选择另一方案。
+- 修改文件：GQS_Z_ContainerPageNavigation.lua（实现两个方案并记录当前模式）。
+- 修改文件：SWModOptions.lua（新增翻页方案下拉选项与配置迁移表项）。
+- 修改文件：42/media/lua/shared/Translate/CN/UI_CN.txt（中文 Lua 翻译）。
+- 修改文件：42/media/lua/shared/Translate/EN/UI_EN.txt（英文 Lua 翻译）。
+- 修改文件：42/media/lua/shared/Translate/CN/UI.json（中文 JSON 翻译）。
+- 修改文件：42/media/lua/shared/Translate/EN/UI.json（英文 JSON 翻译）。
+- 修改文件：42/mod.info（版本号更新为 1.4.1）。
+
+验证说明
+- 已静态检查设置注册 ID、默认选择顺序、运行时读取、两种目标索引算法、Lua 区块结构、中英文翻译及 ZIP 路径/完整性。
+- 当前环境未启动 Project Zomboid，尚未进行游戏内实测。建议测试固定方案的 1→8→15、倒退时 15→8→1、边界停留；再切换第二项确认旧可视区域方案仍可使用。
+
+v1.4.0（容器物品列表 RT + 上下翻页）
+
+容器物品选择 / 翻页
+- 新增 RT + 方向键上/下翻页：首次按下时跳到当前可视区域的最上/最下行；已经位于该边缘时，再按组合键向前/向后移动一页。
+- 翻页距离按当前容器列表的实际可视行数计算，不固定跳 10 个项目，能适应窗口高度、UI 缩放和物品行高变化。
+- 通过当前 ISInventoryPage 的 joyselection 与显示行序号定位，不依赖物品永久 ID；目标行变化后调用原版 ensureVisible()，让列表与滚动条同步滚动。
+- 在列表/详细模式下生效；图标模式不覆盖原版方向键处理。容器页面未获得焦点时不生效。
+- 组合键要求先按住 RT，再按上/下；方向键先按、之后才按 RT，不会被误识别成翻页。按住同一方向不会连续重复翻页。
+- 为避免与原版容器切换冲突，同时按住 LB/RB 时，RT + 上/下继续交给原版处理；RT + B 焦点功能不变。
+- 增加 containerPageNav 诊断日志分类，默认关闭。需要排查时在 GQS_DebugLog.lua 的 DEFAULT_CATEGORIES 中将 containerPageNav 改为 true。
+- 新增文件：GQS_Z_ContainerPageNavigation.lua。
+- 修改文件：GQS_DebugLog.lua（新增翻页日志分类，默认关闭）。
+- 修改文件：42/mod.info（版本号更新为 1.4.0）。
+
+验证说明
+- 已静态检查新增 Lua 文件的括号/区块结构、输入状态分支、页码边界、版本号、修改文件列表及 ZIP 完整性。
+- 当前环境未启动 Project Zomboid，尚未进行游戏内实测。建议先在普通物品列表中测试 RT + 下：首次跳到当前屏幕底部；再次按下滚动到下一页；RT + 上以相反方向工作。另需确认按住组合键不会连续跳页，以及 LB/RB + 上下容器切换仍正常。
+
+v1.3.21（按活动地图实例识别焦点，修复 Y + 左摇杆再次被屏蔽）
+
+地图焦点 / Y + 左摇杆面板切换
+- 用户实测 v1.3.20 后，即使不打开地图，按住 Y 推动左摇杆仍会移动角色且不能切换面板，说明地图保护分支仍可能把焦点误认为活动地图。
+- 改为以 Build 42.21 的 ISWorldMap.instance 作为活动地图依据，并沿焦点对象的 parent 链确认其是否属于当前活动地图；不再把 isReallyVisible()/isVisible() 不可判断或异常返回当作地图仍打开。
+- 地图关闭后，原版 close() 会清理活动地图实例；残留的旧地图焦点因此会进入陈旧焦点清理分支，而不再跳过常规 beginYGesture()。
+- 保留活动地图及其子面板的原版即时 Y/方向键调用路径，避免联机时通过 OnTick 延迟重放 ISWorldMap.onJoypadDown。
+- 不改写 beginYGesture()、setSelectorMovementLock()、processStickNudge() 等原有面板选择核心逻辑。
+- 修改文件：GQSPanelQuickSelect.lua。
+- 修改文件：42/mod.info（版本号更新为 1.3.21）。
+
+验证说明
+- 已静态检查活动地图实例判定、焦点父级遍历、陈旧焦点恢复分支、修改文件列表、版本号及 ZIP 路径。
+- 尚未在游戏内实测。优先验证：不打开地图时，Y + 左摇杆应锁定角色移动并切换 UI 焦点；打开地图期间 Y/方向键正常；关闭地图后上述选择功能恢复；联机地图长按 Y 不再报 ISWorldMap.lua:1381 错误。
+
+v1.3.20（修复地图关闭后 Y + 左摇杆面板选择仍被屏蔽）
+
+地图焦点 / Y + 左摇杆面板切换回归修复
+- 对比 v1.3.18 与 v1.3.19 后确认：v1.3.19 新增的地图分支只按焦点对象类型判断，没有确认地图窗口是否仍然可见。若关闭地图后游戏仍保留隐藏的 ISWorldMap 焦点，OnTick 会持续跳过 beginYGesture()，导致角色移动锁没有启用，左摇杆变回移动角色。
+- 拆分“是否为地图对象”和“地图是否可见并持有焦点”的判断；仅在地图实际可见时暂停自定义 Y 手势。
+- 地图窗口隐藏但仍残留在焦点时，尝试恢复上一个仍可见的非地图焦点；没有可恢复焦点时清除陈旧地图焦点，避免它继续屏蔽面板选择。
+- 地图对象的 Y / 方向键回调仍不会被延迟到 OnTick 重放，保留 v1.3.19 对联机地图报错的保护；地图打开时继续交由原版即时处理。
+- 松开地图期间残留的 Y 后，普通 Y + 左摇杆面板选择应恢复，并重新启用角色移动锁。
+- 修改文件：GQSPanelQuickSelect.lua。
+- 修改文件：42/mod.info（版本号更新为 1.3.20）。
+
+验证说明
+- 已对照 v1.3.18 与 v1.3.19 的代码差异，检查地图可见性分支、陈旧焦点清理、手势状态恢复路径及 ZIP 结构。
+- 当前环境未启动 Project Zomboid，尚未完成游戏内实测。重点验证：单机和联机分别打开地图、关闭地图后，Y + 左摇杆仍能切换面板且按住 Y 时角色不移动；联机地图上的 Y 操作不再触发 ISWorldMap.lua:1381 的延迟回调报错。
+
+v1.3.19（地图焦点下停用自定义 Y 手势，修复联机地图报错）
+
+地图 / Y + 左摇杆面板切换
+- 根据联机日志定位：GQSPanelQuickSelect.lua 会截获 Y，并在 OnTick 中延迟重放原版 ISWorldMap.onJoypadDown；地图处理函数在这种延迟调用上下文中访问到空的 player，触发 ISWorldMap.lua:1381 的 “attempted index: player of non-table: null”。
+- 当 ISWorldMap 获得手柄焦点时，Gamepad QoL Suite 不再截获或延迟 Y，也不拦截地图的方向键输入；地图操作交给原版即时处理。
+- 地图拥有焦点期间禁用自定义 Y + 左摇杆面板/焦点切换，并暂停自定义 Y + 方向键快捷入口，避免地图输入被误判为快捷手势。
+- 若地图打开时已有未完成的 Y 手势，会立即恢复角色移动锁、清除待处理 Y 回调和选择状态，不再重放旧的原版回调。
+- 若地图在 Y 仍按住时关闭，不会把同一次按住事件重新识别成新手势；松开 Y 后，现有功能自动恢复。
+- 不修改原版 ISWorldMap.lua；仅在地图获得手柄焦点时改变本 Mod 的输入处理。
+- 修改文件：GQSPanelQuickSelect.lua。
+- 修改文件：42/mod.info（版本号更新为 1.3.19）。
+
+验证说明
+- 已完成代码差异检查、状态清理路径检查、版本号与 ZIP 结构检查。
+- 当前环境未启动 Project Zomboid，尚未完成游戏内/联机实测。重点测试：联机打开地图后长按 Y、Y + 左摇杆拖动、地图关闭后再用 Y + 左摇杆切换面板；应不再调用延迟的 ISWorldMap.onJoypadDown，且地图外原有功能恢复。
+
+v1.3.18（容器肩键 + 方向键严格按下顺序）
+
+容器切换 / R1、L1 + 上下
+- 参考 GQSPanelQuickSelect.lua 的 Y + 十字键严格顺序判定：必须先按住肩键，再按方向键。
+- 在游戏无障碍设置的容器切换模式 2/3 中，如果上/下方向键已经按住，再按 L1/LB 或 R1/RB，则抑制这次肩键事件，不让它触发反向顺序的容器组合操作。
+- 在合并容器切换方案启用时，上/下先按、肩键后按的无效输入也不会在肩键松开时被误判为单独点按切换容器。
+- 保留有效的 L1/R1 → 上/下组合、单独肩键点按切换（仅适用于原有组合方案）、容器屏幕可见顺序、反向回绕与既有设置。左右方向键不会被这次改动额外屏蔽。
+- 修改文件：SWContainerSwitchModes.lua。
+
+验证说明
+- 已完成代码静态检查、版本和打包结构检查。
+- 尚未进行 Build 42.21.0 游戏内实测。重点测试：先按 L1/R1 再按上/下应正常切换；先按上/下再按 L1/R1 不应切换；普通单独 L1/R1 点按及 LB/RB 容器循环仍应正常。
+
+v1.3.17（R1+右切换到“可用物品/合适物品”后按 B 直接关闭合成窗口）
+
+合成材料子面板 / 手柄焦点
+- 用户反馈 v1.3.16 的兼容保护虽能避开 onJoypadDown 的 nil 错误，但 B 只尝试返回父级焦点，结果可能丢失可用焦点，且后续 R1+左无法切回材料列表。
+- 现在，当焦点位于 ISHandcraftWindow 最右侧“可用物品/合适物品”列表时，按 B 直接调用 HandcraftWindow 的 close()，必要时才依次尝试从 UIManager 移除/隐藏窗口。
+- 关闭后单独清除手柄焦点，避免焦点继续指向已经关闭的列表或窗口。
+- 仅对 HandcraftWindow 内最右侧列表生效；其他列表保留原版 B 导航，并继续保护 getJoypadFocus() 缺失的情况。
+- 新增日志分类 craftingFocus，默认关闭。排查时可在 GQS_DebugLog.lua 中将 craftingFocus = true 开启。
+- 不修改官方 ISScrollingListBox.lua，不影响 R1+方向键材料切换，也不更改 RT+B 的独立快捷逻辑。
+
+验证说明
+- 已完成源码静态检查、打包结构和 ZIP 完整性检查。
+- 未能在此环境启动 Build 42.21.0 实机验证；请测试：打开合成窗口 → 打开替代材料 → R1+右切到最右侧可用物品/合适物品 → 按 B。预期整个合成窗口关闭，手柄焦点回到游戏世界。
+
+v1.3.16（修复合成替代材料子面板按 B 返回时的原版列表焦点错误）
+
+ISScrollingListBox / 手柄焦点兼容
+- 根据用户提供的 Build 42.21 原版 ISScrollingListBox.lua，定位到 onJoypadDown() 的 B 键分支：原版无条件调用 self.joypadParent:getJoypadFocus()。
+- 当某些父级 UI 对象没有 getJoypadFocus() 方法时，该调用会产生 “Object tried to call nil in onJoypadDown”。
+- 新增 GQS_FixScrollingListBoxJoypadB.lua，在不修改游戏原版文件的情况下，为 ISScrollingListBox:onJoypadDown() 加入方法存在性检查，并对 getter 调用增加 pcall 保护。
+- 保留原版 A 键双击/覆盖回调、B 键焦点返回、常规按键转发逻辑；仅在父级无法安全确认焦点时跳过那一步可选检查。
+- 不改变合成菜单、R1+方向键材料切换、Y 快捷操作、RT+B 或其他轮盘功能。
+
+验证说明
+- 对照用户提供的原版源码确认报错行与不安全调用一致。
+- 已进行源码静态检查及 ZIP 完整性检查。
+- 尚未在用户的 Build 42.21.0 游戏内实测；请重点测试：打开合成菜单 → 打开替代材料 → R1+右切换到右侧“可用物品/合适物品”子面板 → 按 B 返回。确认不再报错且焦点返回行为正常。
+
+v1.3.15（统一控制 Select 轮盘额外入口）
+
+Select 轮盘 / SWUICleanup
+- 修正 v1.3.14 开关范围过窄的问题：此前开关只控制 PvP/War Manager 入口，安全状态切换、玩家面板、管理员面板和调试入口仍会被添加。
+- 现在关闭该开关时，SWUICleanup 先调用原版 addCommands()，随后立即返回，不再添加任何额外切片或空白占位；Select 轮盘仅保留原版项目。
+- 开启开关时，才添加安全状态切换、玩家面板、管理员面板（仅管理员可见）、PvP/War Manager，以及调试模式下的调试入口。
+- 保留原来的配置 ID selectWheelPvpOptionEnabled，避免因改名丢失现有设置；同时更新中英文设置标题和提示，让开关作用范围明确。
+- 不改动 SWUICleanup 的其他 UI 清理、库存和 D-pad 轮盘功能，也不修改 CustomGamepadUI 创意工坊原文件。
+
+验证说明
+- 已静态检查 Select 轮盘添加切片的位置，确认所有由 SWUICleanup:addCommands() 追加的内容均位于单一开关的早退判断之后。
+- 已检查设置注册 ID、中英文 TXT/JSON 文本、版本号和 ZIP 结构。
+- 尚未在游戏内实测；请关闭开关并重新进入游戏验证轮盘只显示原版项目，再开启确认扩展项目可恢复。
+
+v1.3.14（PvP 管理入口默认关闭）
+
+Select 轮盘 / SWUICleanup
+- 在 Mod Options「其他功能」中新增“在 Select 轮盘中添加 PvP 管理入口”开关，默认关闭。
+- 默认不再向 Select 轮盘额外添加 UI_ServerSettingGroup_PVP（War Manager / PvP 管理面板）入口。
+- 开启开关后可恢复该额外入口；不影响原版 Select 轮盘、安全状态切换、玩家面板、管理员面板，也不改动 SWUICleanup 的其他 UI 清理功能。
+- 保留本地整合模组做法，不修改 CustomGamepadUI 创意工坊原文件。
+
+项目基线说明
+- Gamepad QoL Suite 基于 CustomGamepadUI（Steam Workshop ID 3001154607）进行本地整合与扩展，并兼容 CleanUI 和 NeatUI_Framework。
+
+验证说明
+- 已静态检查开关默认值、配置迁移、Select 轮盘调用条件、中英文 TXT/JSON 翻译及 ZIP 完整性。
+- 尚未在游戏内验证该开关；请在 Mod Options 中保持关闭测试 PvP 入口是否消失，再开启确认入口可恢复。
+
+v1.3.13（恢复右方向键轮盘设置开关）
+
+Mod Options
+- 修复“按键功能拓展”中缺失的“右方向键轮盘拓展”设置组。
+- 恢复“在右方向键轮盘中添加健身面板”和“在右方向键轮盘中添加技能面板”两个开关，默认均启用，与原有轮盘行为保持一致。
+- 将设置对象加入 GamepadQoLSuiteOptions，供现有 ZZ_GQSRadialRightExtension.lua 实时读取；关闭对应开关后只移除对应的轮盘切片，不改动原版轮盘行为。
+- 将这两个选项加入旧 CustomGamepadUI 配置迁移表；如旧 ModOptions.ini 中存在同名旧设置，且当前组没有值，则可迁移旧值。
+- 中英文 UI 翻译键此前已存在，无需重复添加或更改翻译文件。
+- 保持“健身面板便捷操作”为“按键功能拓展”分组最后一个功能开关。
+
+验证说明
+- 已静态检查设置注册、脚本读取键名、默认值、配置迁移项及版本号。
+- 未在此环境中启动 Project Zomboid；需要在游戏内确认两个开关能够分别显示/隐藏相应的右轮盘项目。
+
+Gamepad QoL Suite 更新日志
+=========================
+
+v1.3.12（基于用户上传的 v1.3.11）
+
+健身面板
+- 修复按 X 执行训练后不自动关闭面板的问题：从“查找直接入队的 ISFitnessAction”改为比较按 X 前后的动作队列对象，兼容 addGetUpAndThen() 可能使用的包装动作路径。
+- 成功检测到新计时动作后，优先调用原版 Close 按钮，保留原版关闭与手柄焦点恢复；仅当未能通过原版关闭时才使用隐藏/移除 UI 的后备处理。
+- 增加健身相关诊断：面板初始化、X 输入、OK 按钮状态、动作队列变化、关闭路径及失败原因。
+- 保留自动训练优先级、30 分钟默认值、原版确认按钮与 A/B/Y 行为、底部 X 提示布局。
+
+日志管理
+- 新增 42/media/lua/client/GQS_DebugLog.lua，提供分类日志入口：multiSelect、panelQuickSelect、containerCycle、containerSwitch、dragTransfer、xTransfer、modOptions、nameColumn、fitnessUI、rbZoom、rbMoodles、rtBFocus、rightRadial。
+- 默认仅启用 fitnessUI，其余分类默认关闭。需要排查其它功能时，只需在 DEFAULT_CATEGORIES 中把对应项改为 true。
+- 已把原先 GQS_DEBUG_LOGGING、RB_MOODLE_DEBUG_ENABLED、GQS_RIGHT_RADIAL_DEBUG 控制的诊断及已知直接 print 调用纳入分类管理。
+- 自定义模块的诊断/异常输出受分类开关控制；游戏引擎本身记录的 Lua 错误不受此开关控制。
+
+Mod Options
+- 将“健身面板便捷操作”标题和开关移动到“按键功能拓展”分组末尾，排在 RT+B 焦点控制/关闭面板选项之后、下一大类“其他功能”之前。
+- 不更改已有配置键、其他选项默认值及“按键功能拓展”标题。
+
+维护约定
+- 新增 Lua 文件统一使用 GQS_ 前缀。已有 ZZ_ 文件暂不直接改名，以免改变其依赖的后置加载顺序；若未来进行命名迁移，应连同目录结构和补丁删除旧文件的步骤一起处理。
+- X 转移状态：穿身衣物、皮带物品、背着的武器可转移；Favorite 收藏品仍受游戏原版转移限制，本版本不修改该限制。
+- RB + 上下左右缩放/状态选择与 RT+B 焦点恢复/关闭面板属于已实现功能，后续不得误列为待开发。
+
+验证说明
+- 已检查 Lua 文本改动、日志调用引用、选项注册顺序、版本号与压缩包结构。
+- 未在此环境中启动 Project Zomboid，健身面板自动关闭行为仍需用户在 Build 42.21.0 游戏内实测确认。
+

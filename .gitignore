@@ -1,0 +1,15 @@
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+*.swp
+*~
+.vscode/
+.idea/
+
+# Local build artifacts and logs (distributed separately as releases)
+*.zip
+*.log
+console.txt
