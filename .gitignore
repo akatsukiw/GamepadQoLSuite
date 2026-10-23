@@ -13,3 +13,6 @@ desktop.ini
 *.zip
 *.log
 console.txt
+
+# Shipped inside the release archive only, not tracked in git
+CHANGELOG_zh-CN.txt
