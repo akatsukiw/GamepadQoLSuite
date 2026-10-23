@@ -253,6 +253,9 @@ No. All changes are runtime behavior; nothing is written into save data. Delete 
 **Where are the logs?**
 `%USERPROFILE%\Zomboid\console.txt`. The mod ships categorized debug logging, all off by default.
 
+**How do I report a bug?**
+Include your game version, mod version, reproduction steps, and the relevant lines from `console.txt`. Mentioning whether it reproduces with this mod alone helps a lot.
+
 ---
 
 ## Compatibility
