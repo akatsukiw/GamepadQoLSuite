@@ -65,17 +65,17 @@ This mod requires **CustomGamepadUI**. Install and enable it first:
 
 ### 2. Install this mod
 
-**Option A: Download the ZIP (recommended)**
+**Option A: Download from Releases (recommended)**
 
-1. Click **Code → Download ZIP** on this repository page
-2. Extract it — you get a folder like `GamepadQoLSuite-main`
-3. **Rename that folder to `GamepadQoLSuite`** (the name must match the mod ID)
-4. Place it in your mods directory:
+1. Open the [Releases](https://github.com/akatsukiw/GamepadQoLSuite/releases) page
+2. Download the latest `GamepadQoLSuite_v<version>_Full.zip`
+3. Extract it — it already contains a `GamepadQoLSuite` folder, **no renaming needed**
+4. Move that whole folder into your mods directory:
 
    ```
-   Windows:  C:\Users\<you>\Zomboid\mods\GamepadQoLSuite\
-   Linux:    ~/Zomboid/mods/GamepadQoLSuite/
-   macOS:    ~/Zomboid/mods/GamepadQoLSuite/
+   Windows:  C:\Users\<you>\Zomboid\mods\
+   Linux:    ~/Zomboid/mods/
+   macOS:    ~/Zomboid/mods/
    ```
 
    The structure should look like:
@@ -89,7 +89,14 @@ This mod requires **CustomGamepadUI**. Install and enable it first:
    └── CHANGELOG_zh-CN.txt
    ```
 
-**Option B: git clone**
+**Option B: Download the source ZIP**
+
+1. Click **Code → Download ZIP** on this repository page
+2. Extract it — you get a folder like `GamepadQoLSuite-main`
+3. **Rename that folder to `GamepadQoLSuite`** (the name must match the mod ID)
+4. Place it in the same mods directory as above
+
+**Option C: git clone**
 
 ```bash
 cd "C:/Users/<you>/Zomboid/mods"

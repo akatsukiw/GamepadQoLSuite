@@ -65,17 +65,17 @@
 
 ### 2. 安装本模组
 
-**方式 A：下载 ZIP（推荐）**
+**方式 A：从 Releases 下载（推荐）**
 
-1. 在本仓库页面点 **Code → Download ZIP**
-2. 解压，得到一个形如 `GamepadQoLSuite-main` 的文件夹
-3. **把文件夹改名为 `GamepadQoLSuite`**（名字必须是这个，否则模组 ID 对不上）
-4. 放到模组目录：
+1. 打开 [Releases](https://github.com/akatsukiw/GamepadQoLSuite/releases) 页面
+2. 下载最新版的 `GamepadQoLSuite_v<版本>_Full.zip`
+3. 解压——里面已经是一个 `GamepadQoLSuite` 文件夹，**不需要改名**
+4. 把它整个放进模组目录：
 
    ```
-   Windows:  C:\Users\<你的用户名>\Zomboid\mods\GamepadQoLSuite\
-   Linux:    ~/Zomboid/mods/GamepadQoLSuite/
-   macOS:    ~/Zomboid/mods/GamepadQoLSuite/
+   Windows:  C:\Users\<你的用户名>\Zomboid\mods\
+   Linux:    ~/Zomboid/mods/
+   macOS:    ~/Zomboid/mods/
    ```
 
    放好后目录结构应该是：
@@ -89,7 +89,14 @@
    └── CHANGELOG_zh-CN.txt
    ```
 
-**方式 B：git clone**
+**方式 B：下载源码 ZIP**
+
+1. 在本仓库页面点 **Code → Download ZIP**
+2. 解压，得到一个形如 `GamepadQoLSuite-main` 的文件夹
+3. **把文件夹改名为 `GamepadQoLSuite`**（名字必须是这个，否则模组 ID 对不上）
+4. 放进上面同样的模组目录
+
+**方式 C：git clone**
 
 ```bash
 cd "C:/Users/<你的用户名>/Zomboid/mods"
