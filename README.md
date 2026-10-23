@@ -12,7 +12,7 @@
 |---|---|
 | 游戏版本 | Build 42.21.0（B42 专用，不兼容 B41） |
 | 前置模组 | [CustomGamepadUI](https://steamcommunity.com/sharedfiles/filedetails/?id=3001154607)（必需） |
-| 开发版本 | `1.5.1.50` |
+| 开发版本 | `1.5.2.0` |
 | 作者 | Akatsuki_w |
 | 界面语言 | 简体中文 / English |
 

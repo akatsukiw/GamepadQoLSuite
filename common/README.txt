@@ -1,3 +1,4 @@
 Gamepad QoL Suite add-on for CustomGamepadUI.
 
-CustomGamepadUI must be enabled as a required dependency. See PATCH_README_zh-CN.txt at the archive root for installation and upgrade notes.
+CustomGamepadUI must be enabled as a required dependency.
+Installation and usage notes: https://github.com/akatsukiw/GamepadQoLSuite

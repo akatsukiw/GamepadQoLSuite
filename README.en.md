@@ -12,7 +12,7 @@ Fills in the parts of B42's controller support that still feel awkward: multi-it
 |---|---|
 | Game version | Build 42.21.0 (B42 only, not compatible with B41) |
 | Required dependency | [CustomGamepadUI](https://steamcommunity.com/sharedfiles/filedetails/?id=3001154607) |
-| Build version | `1.5.1.50` |
+| Build version | `1.5.2.0` |
 | Author | Akatsuki_w |
 | Languages | English / Simplified Chinese |
 
