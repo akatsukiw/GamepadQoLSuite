@@ -226,7 +226,7 @@ The fix: cycle only through facings that **actually have sprites**, ignore point
 
 Result: both two-facing and four-facing furniture rotate correctly and keep the direction you saw.
 
-> We wrote this up as an English bug report for the developers, with vanilla source line numbers and reproduction steps — see `BugReport_FurnitureRotation_B42.21.md` in the development repository.
+> We wrote this up as an English bug report for the developers, with vanilla source line numbers, reproduction steps, and the elimination process for all three root causes. The report is not included in this repository — ask the author if you need a copy.
 
 ### 9. Panel info and trait details
 
