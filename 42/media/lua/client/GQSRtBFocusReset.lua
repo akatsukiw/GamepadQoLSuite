@@ -128,6 +128,28 @@ local function isVisible(object)
     return visible == true or visible == 1
 end
 
+-- ISContextMenu (the world/inventory right-click menu) and its submenus are the
+-- only UI family exposing this method pair, and they have no close() at all.
+local function isContextMenuFamily(object)
+    return type(object) == "table"
+        and type(object.closeAll) == "function"
+        and type(object.hideAndChildren) == "function"
+end
+
+-- A context menu counts as open when either the root or any pooled submenu is
+-- visible: displaySubMenu() calls hideSelf() on the root before showing a child,
+-- so a plain isVisible() check on the root reports "closed" while a submenu is
+-- still on screen.
+local function isContextMenuVisible(object)
+    if isVisible(object) then return true end
+    local submenus = object.instanceMap
+    if type(submenus) ~= "table" then return false end
+    for _, submenu in pairs(submenus) do
+        if type(submenu) == "table" and isVisible(submenu) then return true end
+    end
+    return false
+end
+
 local function getTypeName(object)
     if object == nil then return "" end
     local name = object.Type or object.type or object.className or object.ClassName
@@ -256,14 +278,29 @@ local function collectClosableWindows(playerNum)
     local function add(rawObject, allowNested)
         local object = unwrapUIObject(rawObject)
         if type(object) ~= "table" or seen[object] then return end
-        if not isVisible(object) then return end
+        -- Context menus need their own visibility test: the root is hidden while
+        -- one of its submenus is on screen, and submenus always carry a parent.
+        -- Both would be rejected by the generic checks below even though the menu
+        -- is plainly open.
+        local isMenu = isContextMenuFamily(object)
+        if isMenu then
+            if not isContextMenuVisible(object) then return end
+        elseif not isVisible(object) then
+            return
+        end
         if isOwnedByAnotherPlayer(object, playerNum) then return end
         local name = getTypeName(object)
         if containsAny(name, persistentUIHints) then return end
-        if not allowNested and safeCall(object, "getParent") ~= nil then return end
-        if not objectHasWindowSignal(object, name) then return end
+        if not isMenu then
+            if not allowNested and safeCall(object, "getParent") ~= nil then return end
+            if not objectHasWindowSignal(object, name) then return end
+        end
         seen[object] = true
-        results[#results + 1] = { object = object, name = name ~= "" and name or "UI window", playerNum = playerNum }
+        results[#results + 1] = {
+            object = object,
+            name = name ~= "" and name or (isMenu and "context menu" or "UI window"),
+            playerNum = playerNum,
+        }
     end
 
     local uiManager = rawget(_G, "UIManager")
@@ -324,6 +361,35 @@ local function collectClosableWindows(playerNum)
         if not okAdd then log("skipped problematic fitness entry: " .. tostring(errAdd)) end
     end
 
+    -- The per-player world context menu is a global singleton. Once a submenu is
+    -- expanded its root has already been hidden, so a UIManager scan can miss the
+    -- menu entirely. Add it explicitly; add() deduplicates against the scan.
+    if type(getPlayerContextMenu) == "function" then
+        local ok, menu = pcall(getPlayerContextMenu, playerNum)
+        if ok and menu then
+            local okAdd, errAdd = pcall(add, menu, true)
+            if not okAdd then log("skipped problematic context menu entry: " .. tostring(errAdd)) end
+        end
+    end
+
+    -- PZAPI / AtomUI windows (the fishing panel is one) never reach UIManager in
+    -- a usable shape: instantiate() registers the raw AtomUI java object, and the
+    -- Lua wrapper exposes neither getTable() nor isVisible(). The instance table
+    -- is the only handle, and visibility lives in the plain Lua field `visible`.
+    local pzapi = rawget(_G, "PZAPI")
+    local atomInstances = pzapi and pzapi.UI and pzapi.UI.instances
+    if type(atomInstances) == "table" then
+        for key, ui in pairs(atomInstances) do
+            if type(ui) == "table" and ui.javaObj ~= nil and ui.visible ~= false and not seen[ui] then
+                local name = "PZAPI." .. tostring(key)
+                if not containsAny(string.lower(name), persistentUIHints) then
+                    seen[ui] = true
+                    results[#results + 1] = { object = ui, name = name, playerNum = playerNum, atom = true }
+                end
+            end
+        end
+    end
+
     return results
 end
 
@@ -331,7 +397,31 @@ local function closeWindow(entry)
     local object = entry.object
     local name = entry.name
     local lowerName = string.lower(name or "")
-    if not isVisible(object) then return false end
+
+    -- PZAPI/AtomUI windows are not ISUI elements: no close(), no isVisible(), no
+    -- removeFromUIManager(). Their own close button only calls setVisible(false)
+    -- (FishWindow.lua:304), which is exactly what we do here.
+    if entry.atom then
+        local ok, err = pcall(function() object:setVisible(false) end)
+        if not ok then
+            log("close-all could not hide " .. name .. " (PZAPI): " .. tostring(err))
+            return false
+        end
+        if object.visible == false then
+            log("close-all hid " .. name .. " via PZAPI setVisible(false)")
+            return true
+        end
+        log("close-all could not confirm closure of " .. name .. " (PZAPI)")
+        return false
+    end
+
+    if not isVisible(object) then
+        -- A context menu root is hidden while one of its submenus is showing;
+        -- closeAll() below still has to run so the submenu and cursor state reset.
+        if not (isContextMenuFamily(object) and isContextMenuVisible(object)) then
+            return false
+        end
+    end
 
     -- Inventory, loot, character info and chat are persistent singleton widgets:
     -- hide them instead of removing their UI object, so their normal key can show
@@ -340,6 +430,18 @@ local function closeWindow(entry)
         "isinventorypage", "inventorypage", "islootwindow", "lootwindow", "ischat",
         "ischaracterinfowindow", "characterinfowindow", "playerinfopanel",
     })
+
+    -- ISContextMenu has no close(). closeAll() is the only path that also hides
+    -- every pooled submenu, clears forceVisible/visibleCheck, restores the cursor
+    -- reminder and hands joypad focus back, so prefer it over setVisible(false).
+    if isContextMenuFamily(object) then
+        local ok, err = pcall(function() object:closeAll() end)
+        if ok and not isContextMenuVisible(object) then
+            log("close-all closed " .. name .. " via closeAll()")
+            return true
+        end
+        if not ok then log("closeAll() failed for " .. name .. ": " .. tostring(err)) end
+    end
 
     -- Prefer the panel's own close implementation so it can clear singleton state.
     if type(object.close) == "function" then
@@ -453,6 +555,23 @@ handleRTB = function(playerNum, focusAtPress)
     end
 
     if focus ~= nil then
+        -- A context menu is a transient popup, not a panel. Clearing focus alone
+        -- would leave it (or its expanded submenu) on screen, and a submenu whose
+        -- root is hidden cannot be reached by the scan below. Close it outright,
+        -- which is what the native B handler does.
+        if isContextMenuFamily(focus) then
+            local menuName = getTypeName(focus)
+            local closed = closeWindow({
+                object = focus,
+                name = menuName ~= "" and menuName or "context menu",
+                playerNum = playerNum,
+            })
+            log("RT+B closed focused context menu for player " .. tostring(playerNum)
+                .. ": closed=" .. tostring(closed))
+            setFocus(playerNum, nil)
+            return
+        end
+
         local name = getTypeName(focus)
         local ok = setFocus(playerNum, nil)
         log("RT+B focus-return: player " .. tostring(playerNum) .. " returned to world focus; panel kept open: "
