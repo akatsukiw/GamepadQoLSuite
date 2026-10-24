@@ -11,6 +11,9 @@
 --   * the outline is written through setOutlineHighlight(playerNum, ...), which
 --     is per local player and purely client-side, so multiplayer peers are never
 --     affected and two local players may highlight different targets
+--   * the flag is one-shot (IsoMovingObject.renderlast() clears it after every
+--     frame), so it is re-applied on every tick, exactly like the native
+--     CombatManager.update() does for player 1
 --   * the target is cleared as soon as the player stops aiming, switches target,
 --     dies, or the vanilla meleeOutline option is turned off
 --
@@ -141,15 +144,12 @@ local function applyOutline(playerNum, zombie)
             r, g, b = cr, cg, cb
         end
     end
-    local ok = pcall(function()
+    -- Indexed colour setter: only this player's channel, so player 1 keeps its
+    -- own colour (the unindexed overload writes every player's channel).
+    pcall(function()
         zombie:setOutlineHighlightCol(playerNum, r, g, b, 1.0)
         zombie:setOutlineHighlight(playerNum, true)
     end)
-    if ok then
-        log("outlined melee target for player " .. tostring(playerNum))
-    else
-        log("could not outline melee target for player " .. tostring(playerNum))
-    end
 end
 
 local function updatePlayer(playerNum)
@@ -168,13 +168,23 @@ local function updatePlayer(playerNum)
     end
 
     local target = findMeleeTarget(player)
-    if targets[playerNum] == target then return end
-
-    clearTarget(playerNum)
-    if target then
-        targets[playerNum] = target
-        applyOutline(playerNum, target)
+    if target == nil then
+        clearTarget(playerNum)
+        return
     end
+
+    if targets[playerNum] ~= target then
+        clearTarget(playerNum)
+        targets[playerNum] = target
+        log("outlined melee target for player " .. tostring(playerNum))
+    end
+
+    -- The outline flag is one-shot: IsoMovingObject.renderlast() sets it back to
+    -- false as soon as the frame has been drawn, so it has to be re-applied on
+    -- every tick. The native CombatManager.update() does exactly the same for
+    -- player 1; setting it only when the target changes makes it flash for a
+    -- single frame and then vanish.
+    applyOutline(playerNum, target)
 end
 
 local function onTick()
