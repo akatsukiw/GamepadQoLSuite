@@ -554,6 +554,56 @@ local function getTraitHint(screen)
     return hint
 end
 
+-- ---------------------------------------------------------------------------
+-- Bottom-right controller prompts
+-- ---------------------------------------------------------------------------
+-- The trait prompt and the nutrition prompt share this corner, so both use the
+-- same row geometry: a row is as tall as the taller of the icon box and the font
+-- line, and each part is centred inside it with (rowHeight - partHeight) / 2 --
+-- the rule the Build/Handcraft header prompts already use.
+--
+-- Deriving the icon position from the icon height alone only lines up while the
+-- icon happens to be taller than the font; the moment UI scaling makes the font
+-- taller the icon sticks to the top of the row and the pair looks misaligned.
+--
+-- GQSNutritionInfoPanel keeps its own copy of these two helpers on purpose, so
+-- either module can be switched off without breaking the other's prompt.
+local PROMPT_ICON_SIZE = 18
+local PROMPT_GAP = 5
+local PROMPT_RIGHT_PADDING = 10
+local PROMPT_BOTTOM_PADDING = 7
+local PROMPT_ROW_SPACING = 4
+
+-- One row height for every prompt, independent of the individual icon aspect
+-- ratio, so stacked rows stay evenly spaced.
+local function getPromptRowHeight(font)
+    return math.max(PROMPT_ICON_SIZE, getTextManager():getFontHeight(font))
+end
+
+local function getBottomRowTop(element, font)
+    return (element.height or 420) - getPromptRowHeight(font) - PROMPT_BOTTOM_PADDING
+end
+
+-- Right-aligned "icon + label" prompt, vertically centred in its row.
+local function drawPromptRow(element, label, texture, fallbackIcon, rowTop, font)
+    local rowHeight = getPromptRowHeight(font)
+    local iconW, iconH = textureSize(texture, PROMPT_ICON_SIZE)
+    local manager = getTextManager()
+    local textWidth = manager:MeasureStringX(font, label)
+    local rightEdge = (element.width or 360) - PROMPT_RIGHT_PADDING
+    local leftX = rightEdge - (iconW + PROMPT_GAP + textWidth)
+
+    local iconY = rowTop + math.floor((rowHeight - iconH) / 2)
+    local textY = rowTop + math.floor((rowHeight - manager:getFontHeight(font)) / 2)
+
+    if texture then
+        pcall(element.drawTextureScaled, element, texture, leftX, iconY, iconW, iconH, 1, 1, 1, 1)
+    else
+        pcall(element.drawText, element, fallbackIcon, leftX, textY, 1, 1, 1, 1, font)
+    end
+    pcall(element.drawText, element, label, leftX + iconW + PROMPT_GAP, textY, 0.90, 0.90, 0.90, 1, font)
+end
+
 local function positionSidePanel(screen, panel)
     local host = getHostWindow(screen)
     local left, top, viewportWidth, viewportHeight = getViewport(screen)
@@ -653,16 +703,21 @@ local function closeOpenPanels()
 end
 
 -- Exposed so the nutrition readout can close this panel when it opens, and can
--- measure the X prompt before placing its own Y prompt next to it.
+-- stack its own Y prompt directly above the X prompt.
 GQSTraitInfo = {
     close = closePanel,
-    -- Horizontal space taken by the X prompt, including both inner gaps.
-    -- Returns 0 when the prompt is not drawn.
-    hintSpan = function(screen)
+    -- Where the X prompt currently sits. Returns nil when it is not drawn, which
+    -- tells the nutrition readout to fall back to the bottom-right corner.
+    promptLayout = function(screen)
         local hint = getTraitHint(screen)
-        if not hint then return 0 end
-        local iconW = textureSize(getJoypadTexture("XButton"), 18)
-        return iconW + 5 + measureText(hint, UIFont.Small) + 5
+        if not hint then return nil end
+        local font = UIFont and UIFont.Small
+        if not font then return nil end
+        return {
+            rowTop = getBottomRowTop(screen, font),
+            rowHeight = getPromptRowHeight(font),
+            spacing = PROMPT_ROW_SPACING,
+        }
     end,
 }
 
@@ -727,22 +782,9 @@ local function install()
             local result = { originalRender(self, ...) }
             local hint = getTraitHint(self)
             if hint then
-                local xTexture = getJoypadTexture("XButton")
                 local font = UIFont.Small
-                local textWidth = measureText(hint, font)
-                local iconW, iconH = textureSize(xTexture, 18)
-                local gap, rightPadding = 5, 10
-                local x = (self.width or 360) - rightPadding - textWidth - gap - iconW
-                local y = (self.height or 420) - math.max(iconH, getTextManager():getFontHeight(font)) - 7
-                if xTexture then
-                    pcall(self.drawTextureScaled, self, xTexture, x, y, iconW, iconH, 1, 1, 1, 1)
-                    x = x + iconW + gap
-                else
-                    self:drawText("X", x, y, 1, 1, 1, 1, font)
-                    x = x + measureText("X", font) + gap
-                end
-                pcall(self.drawText, self, hint, x, y + math.max(0, (iconH - getTextManager():getFontHeight(font)) / 2),
-                    0.90, 0.90, 0.90, 1, font)
+                drawPromptRow(self, hint, getJoypadTexture("XButton"), "X",
+                    getBottomRowTop(self, font), font)
             end
             return unpack(result)
         end

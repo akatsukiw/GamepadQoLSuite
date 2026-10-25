@@ -44,7 +44,10 @@ local NUTRITION_ROWS = {
 
 local PADDING = 10
 local HEADER_HEIGHT = 36
-local VALUE_COLUMN_WIDTH = 78
+-- Minimum width of the numeric column. The actual width grows with the font so
+-- the panel keeps working when UI scaling enlarges the text.
+local VALUE_COLUMN_MIN_WIDTH = 78
+local VALUE_WIDTH_SAMPLE = "-000000.0"
 local LABEL_VALUE_GAP = 14
 local MIN_PANEL_WIDTH = 168
 
@@ -80,6 +83,43 @@ local function measureText(text, font)
     local ok, width = pcall(function() return getTextManager():MeasureStringX(font, text) end)
     if ok and type(width) == "number" then return width end
     return #tostring(text or "") * 8
+end
+
+-- ---------------------------------------------------------------------------
+-- Bottom-right controller prompt
+-- ---------------------------------------------------------------------------
+-- Same row geometry as GQSTraitInfoPanel (which keeps its own copy so either
+-- module can be switched off independently): a row is as tall as the taller of
+-- the icon box and the font line, and each part is centred inside it with
+-- (rowHeight - partHeight) / 2. Using the icon height as the row height only
+-- lines up while the icon is taller than the font.
+local PROMPT_ICON_SIZE = 18
+local PROMPT_GAP = 5
+local PROMPT_RIGHT_PADDING = 10
+local PROMPT_BOTTOM_PADDING = 7
+local PROMPT_ROW_SPACING = 4
+
+local function getPromptRowHeight(font)
+    return math.max(PROMPT_ICON_SIZE, getTextManager():getFontHeight(font))
+end
+
+local function drawPromptRow(element, label, texture, fallbackIcon, rowTop, font)
+    local rowHeight = getPromptRowHeight(font)
+    local iconW, iconH = textureSize(texture, PROMPT_ICON_SIZE)
+    local manager = getTextManager()
+    local textWidth = manager:MeasureStringX(font, label)
+    local rightEdge = (element.width or 360) - PROMPT_RIGHT_PADDING
+    local leftX = rightEdge - (iconW + PROMPT_GAP + textWidth)
+
+    local iconY = rowTop + math.floor((rowHeight - iconH) / 2)
+    local textY = rowTop + math.floor((rowHeight - manager:getFontHeight(font)) / 2)
+
+    if texture then
+        pcall(element.drawTextureScaled, element, texture, leftX, iconY, iconW, iconH, 1, 1, 1, 1)
+    else
+        pcall(element.drawText, element, fallbackIcon, leftX, textY, 1, 1, 1, 1, font)
+    end
+    pcall(element.drawText, element, label, leftX + iconW + PROMPT_GAP, textY, 0.90, 0.90, 0.90, 1, font)
 end
 
 local function getHostWindow(screen)
@@ -161,6 +201,9 @@ end
 -- Width depends only on the labels, which are fixed, so this runs once. The
 -- numeric column keeps a constant width instead of tracking the widest current
 -- value, otherwise the panel would jitter while the numbers change.
+-- Width and height both follow NUTRITION_ROWS, so adding a row grows the panel
+-- without touching the layout code: every row contributes self.rowHeight and the
+-- widest label decides the label column.
 function GQSNutritionInfoPanel:measureContent()
     local manager = getTextManager()
     local labelWidth = 0
@@ -170,7 +213,8 @@ function GQSNutritionInfoPanel:measureContent()
     end
     self.labelWidth = labelWidth
 
-    local contentWidth = PADDING * 2 + labelWidth + LABEL_VALUE_GAP + VALUE_COLUMN_WIDTH
+    local valueWidth = math.max(VALUE_COLUMN_MIN_WIDTH, manager:MeasureStringX(self.font, VALUE_WIDTH_SAMPLE))
+    local contentWidth = PADDING * 2 + labelWidth + LABEL_VALUE_GAP + valueWidth
     local titleWidth = manager:MeasureStringX(UIFont.Medium, getText("UI_GQOS_NutritionInfoTitle"))
     local closeWidth = manager:MeasureStringX(self.font, getText("UI_GQOS_NutritionPanelClose"))
     local headerWidth = PADDING * 2 + titleWidth + 8 + 18 + 5 + closeWidth
@@ -354,34 +398,22 @@ local function drawHint(screen)
     end
 
     local font = UIFont.Small
-    local yTexture = getJoypadTexture("YButton")
-    local iconW, iconH = textureSize(yTexture, 18)
-    local textWidth = measureText(hint, font)
-    local gap, rightPadding = 5, 10
+    local texture = getJoypadTexture("YButton")
+    local rowHeight = getPromptRowHeight(font)
+    local rowTop = (screen.height or 420) - rowHeight - PROMPT_BOTTOM_PADDING
 
-    -- The X trait prompt owns the bottom-right corner. Ask the trait module how
-    -- much horizontal room it takes and sit immediately to its left, so the two
-    -- prompts stay aligned even when the X label switches to "close".
-    local xSpan = 0
+    -- The X trait prompt owns the bottom row. Stack the Y prompt directly above
+    -- it with the right edges aligned: side by side, the pair reaches far enough
+    -- left to run into the survival-time line at the bottom of the window.
     local traitInfo = rawget(_G, "GQSTraitInfo")
-    if traitInfo and type(traitInfo.hintSpan) == "function" then
-        local ok, value = pcall(traitInfo.hintSpan, screen)
-        if ok and type(value) == "number" then xSpan = value end
+    if traitInfo and type(traitInfo.promptLayout) == "function" then
+        local ok, layout = pcall(traitInfo.promptLayout, screen)
+        if ok and type(layout) == "table" then
+            rowTop = layout.rowTop - rowHeight - (layout.spacing or PROMPT_ROW_SPACING)
+        end
     end
 
-    local x = (screen.width or 360) - rightPadding - textWidth - gap - iconW - xSpan
-    local y = (screen.height or 420) - math.max(iconH, getTextManager():getFontHeight(font)) - 7
-
-    if yTexture then
-        pcall(screen.drawTextureScaled, screen, yTexture, x, y, iconW, iconH, 1, 1, 1, 1)
-        x = x + iconW + gap
-    else
-        pcall(screen.drawText, screen, "Y", x, y, 1, 1, 1, 1, font)
-        x = x + measureText("Y", font) + gap
-    end
-    pcall(screen.drawText, screen, hint,
-        x, y + math.max(0, (iconH - getTextManager():getFontHeight(font)) / 2),
-        0.90, 0.90, 0.90, 1, font)
+    drawPromptRow(screen, hint, texture, "Y", rowTop, font)
 end
 
 -- ---------------------------------------------------------------------------
