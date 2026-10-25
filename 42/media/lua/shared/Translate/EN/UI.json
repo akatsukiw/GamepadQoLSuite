@@ -93,7 +93,7 @@
     "UI_GQOS_RightRadialSkills": "Skills Panel",
     "UI_GQOS_FitnessUIEnhancementTitle": "Fitness Panel Convenience",
     "UI_GQOS_FitnessUIEnhancementEnabled": "Enable Fitness Panel Enhancements",
-    "UI_GQOS_FitnessUIEnhancementEnabled_tooltip": "Opens the fitness panel with a preferred available exercise already selected, and lets X start the workout and close the panel.\nWhen disabled, vanilla Fitness Panel behavior is restored.",
+    "UI_GQOS_FitnessUIEnhancementEnabled_tooltip": "Opens the fitness panel with the exercise you confirmed last time already selected, falling back to a default priority list when there is no record or the exercise is unavailable.\nAlso lets X start the workout and close the panel.\nWhen disabled, vanilla Fitness Panel behavior is restored.",
     "UI_GQOS_FitnessDefaultDuration": "Default workout duration (minutes)",
     "UI_GQOS_FitnessDefaultDuration_tooltip": "Duration pre-filled when the fitness panel opens.\n10-60 minutes in steps of 10.",
     "UI_GQOS_FitnessStart": "Start Workout",

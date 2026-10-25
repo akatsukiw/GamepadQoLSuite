@@ -1,6 +1,10 @@
--- Gamepad QoL Suite: Fitness panel convenience improvements (v1.3.12 / Fix3).
+-- Gamepad QoL Suite: Fitness panel convenience improvements (v1.5.3).
 -- Wraps vanilla ISFitnessUI methods only; does not replace the vanilla confirmation path.
 -- Enabled by the "Fitness Panel Enhancements" Mod Options checkbox.
+--
+-- v1.5.3: the preselected exercise is no longer a fixed list -- the player's own
+-- last confirmed choice is remembered and restored (see "Remembered exercise
+-- selection" below).
 
 pcall(require, "ISUI/ISPanelJoypad")
 pcall(require, "ISUI/ISButton")
@@ -47,50 +51,159 @@ local function containsLiteral(text, needle)
         and string.find(string.lower(text), string.lower(needle), 1, true) ~= nil
 end
 
-local function optionMatches(option, textKey, idWords)
-    if not option then return false end
+-- Exercise ids come from FitnessExercises.exercisesType. Vanilla ships squats,
+-- pushups, situp, burpees, barbellcurl, dumbbellpress and bicepscurl; other mods
+-- may add more. Matching on the id is exact and survives translation changes,
+-- the translated name is only a fallback for a build that renamed the ids.
+local function findOptionIndex(list, exerciseId, textKey)
+    if type(list.options) ~= "table" then return nil end
 
-    local displayName = safeGetText(textKey)
-    if displayName and containsLiteral(option.text, displayName) then
-        return true
+    if type(exerciseId) == "string" and exerciseId ~= "" then
+        for index, option in ipairs(list.options) do
+            if option.data == exerciseId then return index end
+        end
     end
 
-    local optionId = string.lower(tostring(option.data or ""))
-    for _, word in ipairs(idWords) do
-        if not string.find(optionId, word, 1, true) then return false end
+    local displayName = textKey and safeGetText(textKey) or nil
+    if displayName then
+        for index, option in ipairs(list.options) do
+            if containsLiteral(option.text, displayName) then return index end
+        end
     end
-    return #idWords > 0
+    return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Remembered exercise selection
+-- ---------------------------------------------------------------------------
+-- Vanilla preselects whatever the list happens to build first (the options come
+-- out of a pairs() loop, so the order is not even stable), and this module used
+-- to force a fixed priority list. Players repeat the same exercise most of the
+-- time, so the last confirmed choice is stored per local player and restored the
+-- next time the panel opens.
+--
+-- A file is used instead of player ModData on purpose: in multiplayer the server
+-- owns the player's ModData and overwrites a client-side write on the next
+-- login, while Zomboid/Lua/ is plain local storage that always survives.
+local preferenceCache = {}
+
+local function preferenceFileName(playerNum)
+    return "GQSFitnessLastExercise_" .. tostring(playerNum + 1) .. ".txt"
+end
+
+local function readExercisePreference(playerNum)
+    if type(getFileReader) ~= "function" then return nil end
+    local ok, reader = pcall(getFileReader, preferenceFileName(playerNum), false)
+    if not ok or reader == nil then return nil end
+
+    local value = nil
+    pcall(function()
+        local line = reader:readLine()
+        if line ~= nil then value = tostring(line) end
+        reader:close()
+    end)
+    if value == nil then return nil end
+
+    value = string.gsub(value, "^%s*(.-)%s*$", "%1")
+    if value == "" or #value > 64 or string.find(value, "[%c]") then return nil end
+    return value
+end
+
+local function writeExercisePreference(playerNum, exerciseId)
+    if type(getFileWriter) ~= "function" then return false end
+    local ok, writer = pcall(getFileWriter, preferenceFileName(playerNum), true, false)
+    if not ok or writer == nil then return false end
+    return (pcall(function()
+        writer:writeln(exerciseId)
+        writer:close()
+    end))
+end
+
+local function getLocalPlayerNum(self)
+    if type(self.playerNum) == "number" then return self.playerNum end
+    local player = self.player
+    if player and type(player.getPlayerNum) == "function" then
+        local ok, num = pcall(player.getPlayerNum, player)
+        if ok and type(num) == "number" then return num end
+    end
+    return nil
+end
+
+-- Called from the clickedExe wrapper, i.e. only for a choice the player actually
+-- confirmed (mouse click or joypad A on the radio list).
+local function rememberExercise(self)
+    if not isEnhancementEnabled() then return end
+    local playerNum = getLocalPlayerNum(self)
+    if playerNum == nil then return end
+
+    local exerciseId = self.selectedExe
+    if type(exerciseId) ~= "string" or exerciseId == "" then return end
+    if preferenceCache[playerNum + 1] == exerciseId then return end
+
+    -- Only cache after a successful write, otherwise a failed write would
+    -- suppress every retry for the rest of the session.
+    if writeExercisePreference(playerNum, exerciseId) then
+        preferenceCache[playerNum + 1] = exerciseId
+        fitnessLog("remembered exercise '" .. exerciseId .. "' for player " .. tostring(playerNum + 1))
+    else
+        fitnessLog("could not persist exercise '" .. exerciseId .. "' for player " .. tostring(playerNum + 1), true)
+    end
+end
+
+local function applyExerciseSelection(self, index, exerciseId)
+    local list = self.exercises
+    if type(list.setSelected) == "function" then
+        pcall(list.setSelected, list, index)
+    else
+        list.selected = index
+    end
+    -- Move the joypad cursor as well, otherwise a controller user has to walk
+    -- the cursor down to the restored option before pressing A.
+    list.joypadIndex = index
+    self.selectedExe = exerciseId
+    if type(self.selectedNewExercise) == "function" then
+        pcall(self.selectedNewExercise, self)
+    end
 end
 
 local function selectPreferredExercise(self)
     local list = self.exercises
     if not list or type(list.options) ~= "table" then return false end
 
-    -- Enabled state is produced by the vanilla list-building logic, including equipment checks.
+    -- 1. The player's own last confirmed choice wins, as long as the exercise is
+    --    still listed and still usable. option.enabled is computed by the vanilla
+    --    list-building code, so it already includes the equipment check.
+    local playerNum = getLocalPlayerNum(self)
+    if playerNum ~= nil then
+        local remembered = readExercisePreference(playerNum)
+        if remembered then
+            local index = findOptionIndex(list, remembered, nil)
+            if index and list.options[index].enabled ~= false then
+                applyExerciseSelection(self, index, remembered)
+                preferenceCache[playerNum + 1] = remembered
+                fitnessLog("restored remembered exercise '" .. remembered .. "'")
+                return true
+            end
+            fitnessLog("remembered exercise '" .. remembered
+                .. "' is unavailable right now; using the default priority list.")
+        end
+    end
+
+    -- 2. First run, or the remembered exercise needs equipment the player is not
+    --    carrying: keep the original priority list.
     local priorities = {
-        { key = "IGUI_BarbellCurl", idWords = { "barbell", "curl" } },
-        { key = "IGUI_DumbbellPress", idWords = { "dumbbell", "press" } },
-        { key = "IGUI_PushUps", idWords = { "push" } },
+        { id = "barbellcurl", key = "IGUI_BarbellCurl" },
+        { id = "dumbbellpress", key = "IGUI_DumbbellPress" },
+        { id = "pushups", key = "IGUI_PushUps" },
     }
 
     for _, wanted in ipairs(priorities) do
-        for index, option in ipairs(list.options) do
-            if optionMatches(option, wanted.key, wanted.idWords) and option.enabled ~= false then
-                local exerciseId = option.data
-                if exerciseId == nil then return false end
-
-                if type(list.setSelected) == "function" then
-                    pcall(list.setSelected, list, index)
-                else
-                    list.selected = index
-                end
-                list.joypadIndex = index
-                self.selectedExe = exerciseId
-                if type(self.selectedNewExercise) == "function" then
-                    pcall(self.selectedNewExercise, self)
-                end
-                return true
-            end
+        local index = findOptionIndex(list, wanted.id, wanted.key)
+        if index and list.options[index].enabled ~= false then
+            local exerciseId = list.options[index].data
+            if exerciseId == nil then return false end
+            applyExerciseSelection(self, index, exerciseId)
+            return true
         end
     end
     return false
@@ -389,6 +502,20 @@ if type(originalJoypadDown) == "function" then
         if type(originalJoypadDown) == "function" then
             return originalJoypadDown(self, button, joypadData, ...)
         end
+    end
+end
+
+-- Vanilla funnels every confirmed exercise change (mouse click and joypad A on
+-- the radio list) through ISFitnessUI:clickedExe, so that is the single point
+-- where a player's choice becomes final. The reference is read inside
+-- initialise() when the radio buttons are built, and this wrapper is installed
+-- at load time, so the vanilla call site picks up the wrapper.
+local originalClickedExe = FitnessUI.clickedExe
+if type(originalClickedExe) == "function" then
+    FitnessUI.clickedExe = function(self, buttons, index)
+        local result = originalClickedExe(self, buttons, index)
+        pcall(rememberExercise, self)
+        return result
     end
 end
 

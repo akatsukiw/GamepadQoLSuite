@@ -93,7 +93,7 @@
     "UI_GQOS_RightRadialSkills": "技能面板",
     "UI_GQOS_FitnessUIEnhancementTitle": "健身面板便捷操作",
     "UI_GQOS_FitnessUIEnhancementEnabled": "启用健身面板增强",
-    "UI_GQOS_FitnessUIEnhancementEnabled_tooltip": "打开健身面板时自动选择可用的优先训练，并允许按X执行训练后自动关闭面板。\n关闭后恢复原版健身面板行为。",
+    "UI_GQOS_FitnessUIEnhancementEnabled_tooltip": "打开健身面板时自动选中你上次确认过的训练项目；没有记录或该训练当前不可用时，回落到默认优先项。\n同时允许按X执行训练后自动关闭面板。\n关闭后恢复原版健身面板行为。",
     "UI_GQOS_FitnessDefaultDuration": "默认健身时长（分钟）",
     "UI_GQOS_FitnessDefaultDuration_tooltip": "打开健身面板时自动填入的时长。\n可选10–60分钟，步进10。",
     "UI_GQOS_FitnessStart": "执行健身",
