@@ -258,13 +258,54 @@ local function isWorldMapOpen(playerNum, preferredObject)
     return false
 end
 
+-- Tooltips and other mouse-following overlays are never windows, however large
+-- they get. ISToolTip is matched through the metatable chain so modded tooltips
+-- that derive from it are caught as well.
+local function isTooltipFamily(object)
+    if object.followMouse == true then return true end
+    local tooltipClass = rawget(_G, "ISToolTip")
+    if type(tooltipClass) ~= "table" then return false end
+    local ok, found = pcall(function()
+        local current = object
+        for _ = 1, 8 do
+            current = getmetatable(current)
+            if type(current) ~= "table" then return false end
+            if current == tooltipClass then return true end
+        end
+        return false
+    end)
+    return ok and found == true
+end
+
+-- ISPanelJoypad keeps joypadButtonsY; a plain ISUIElement does not. That is the
+-- only reliable split between a joypad-navigable panel and a HUD widget, because
+-- ISUIElement itself defines default onJoypadDown / onJoypadDirUp forwarders, so
+-- the presence of those methods matches every UI element in the game.
+local function isJoypadNavigablePanel(object)
+    return type(object.joypadButtonsY) == "table"
+end
+
 local function objectHasWindowSignal(object, name)
+    -- Tooltips are read-only overlays. Treating them as windows made RT+B close
+    -- modded detail tooltips (Modern Status) whenever they were large enough.
+    if isTooltipFamily(object) then return false end
+
     if containsAny(name, windowNameHints) then return true end
+
+    -- Real window chrome only exists on draggable, titled windows.
     if object.title ~= nil or object.titleBar ~= nil or object.closeButton ~= nil then return true end
-    if object.resizable == true or object.moveWithMouse == true then return true end
+
     local width = tonumber(safeCall(object, "getWidth") or object.width) or 0
     local height = tonumber(safeCall(object, "getHeight") or object.height) or 0
-    return type(object.onJoypadDown) == "function" and width >= 150 and height >= 90
+    -- A draggable HUD widget is not a window. moveWithMouse/resizable only mean
+    -- "the player may move it"; requiring a window-sized surface keeps unlocked
+    -- status indicators (48x48, 168x18) out of the close-all pass. Without this
+    -- guard, unlocking a HUD made RT+B hide every indicator on screen.
+    if width < 150 or height < 90 then return false end
+
+    if object.resizable == true or object.moveWithMouse == true then return true end
+    if isJoypadNavigablePanel(object) then return true end
+    return type(object.onJoypadDown) == "function"
 end
 
 local function isOwnedByAnotherPlayer(object, playerNum)
