@@ -171,6 +171,7 @@ if options then
     GQS.fitnessUIEnhancementEnabled = options:addTickBox("fitnessUIEnhancementEnabled", "UI_GQOS_FitnessUIEnhancementEnabled", true, "UI_GQOS_FitnessUIEnhancementEnabled_tooltip")
     GQS.fitnessDefaultDuration = options:addSlider("fitnessDefaultDuration", "UI_GQOS_FitnessDefaultDuration", 10, 60, 10, 30, "UI_GQOS_FitnessDefaultDuration_tooltip")
     GQS.panelInfoEnhancementEnabled = options:addTickBox("panelInfoEnhancementEnabled", "UI_GQOS_PanelInfoEnhancementEnabled", true, "UI_GQOS_PanelInfoEnhancementEnabled_tooltip")
+    GQS.nutritionInfoEnabled = options:addTickBox("nutritionInfoEnabled", "UI_GQOS_NutritionInfoEnabled", true, "UI_GQOS_NutritionInfoEnabled_tooltip")
 
     options:addSeparator()
     options:addTitle("UI_GQOS_MiscFeaturesTitle")

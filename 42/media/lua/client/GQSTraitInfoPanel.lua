@@ -541,6 +541,19 @@ local function isScreenActive(screen)
     return true
 end
 
+-- The X prompt label depends on whether the selector is currently open. Kept in
+-- one place so the nutrition readout can measure the space it occupies and sit
+-- to its left without duplicating the wording.
+local function getTraitHint(screen)
+    if not isFeatureEnabled() or not isScreenActive(screen) then return nil end
+    local sidePanelOpen = screen._gqsTraitInfoSidePanel and safeVisible(screen._gqsTraitInfoSidePanel)
+    local hint = getText(sidePanelOpen and "UI_GQOS_TraitCloseHint" or "UI_GQOS_TraitOpenHint")
+    if hint == "UI_GQOS_TraitCloseHint" or hint == "UI_GQOS_TraitOpenHint" or hint == nil or hint == "" then
+        hint = sidePanelOpen and "关闭详情" or "特质信息"
+    end
+    return hint
+end
+
 local function positionSidePanel(screen, panel)
     local host = getHostWindow(screen)
     local left, top, viewportWidth, viewportHeight = getViewport(screen)
@@ -597,6 +610,13 @@ end
 
 local function openPanel(screen)
     if not isFeatureEnabled() or not isScreenActive(screen) then return false end
+
+    -- Mutually exclusive with the Y nutrition readout.
+    local nutrition = rawget(_G, "GQSNutritionInfo")
+    if nutrition and type(nutrition.close) == "function" then
+        pcall(nutrition.close, screen)
+    end
+
     local panel = screen._gqsTraitInfoSidePanel
     if not panel then
         panel = GQSTraitInfoSidePanel:new(screen)
@@ -631,6 +651,20 @@ local function closeOpenPanels()
     for screen in pairs(openScreens) do screens[#screens + 1] = screen end
     for _, screen in ipairs(screens) do closePanel(screen) end
 end
+
+-- Exposed so the nutrition readout can close this panel when it opens, and can
+-- measure the X prompt before placing its own Y prompt next to it.
+GQSTraitInfo = {
+    close = closePanel,
+    -- Horizontal space taken by the X prompt, including both inner gaps.
+    -- Returns 0 when the prompt is not drawn.
+    hintSpan = function(screen)
+        local hint = getTraitHint(screen)
+        if not hint then return 0 end
+        local iconW = textureSize(getJoypadTexture("XButton"), 18)
+        return iconW + 5 + measureText(hint, UIFont.Small) + 5
+    end,
+}
 
 local function install()
     pcall(require, "XpSystem/ISUI/ISCharacterScreen")
@@ -691,12 +725,8 @@ local function install()
     if type(originalRender) == "function" and not CharacterScreen._gqsTraitInfoHintInstalled then
         CharacterScreen.render = function(self, ...)
             local result = { originalRender(self, ...) }
-            if isFeatureEnabled() and isScreenActive(self) then
-                local sidePanelOpen = self._gqsTraitInfoSidePanel and safeVisible(self._gqsTraitInfoSidePanel)
-                local hint = getText(sidePanelOpen and "UI_GQOS_TraitCloseHint" or "UI_GQOS_TraitOpenHint")
-                if hint == "UI_GQOS_TraitCloseHint" or hint == "UI_GQOS_TraitOpenHint" or hint == nil or hint == "" then
-                    hint = sidePanelOpen and "关闭详情" or "特质信息"
-                end
+            local hint = getTraitHint(self)
+            if hint then
                 local xTexture = getJoypadTexture("XButton")
                 local font = UIFont.Small
                 local textWidth = measureText(hint, font)
