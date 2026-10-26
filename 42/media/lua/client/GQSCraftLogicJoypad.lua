@@ -262,7 +262,7 @@ local function expandFirstNode(self)
 
     for index, entry in ipairs(list.items) do
         local data = entry and entry.item
-        if type(data) == "table" and data.isNode and type(data.node) == "table" then
+        if type(data) == "table" and data.isNode and data.node ~= nil then
             local node = data.node
             local expanded = false
             if type(node.setExpandedAvailable) == "function" then
@@ -272,7 +272,8 @@ local function expandFirstNode(self)
             if type(node.setExpandedUsed) == "function" then
                 pcall(node.setExpandedUsed, node, true)
             end
-            log("X: expanding node row " .. tostring(index) .. " expanded=" .. tostring(expanded))
+            log("X: expanding node row " .. tostring(index)
+                .. " nodeType=" .. type(node) .. " expanded=" .. tostring(expanded))
             if expanded and type(panel.populate) == "function" then
                 pcall(panel.populate, panel)
                 return true
@@ -507,8 +508,14 @@ end
 -- coordinates converted into this panel's space, so they follow the real
 -- button positions instead of guessing offsets.
 local function drawButtonPrompts(self)
-    local originX = tonumber(safeIndex(self, "x")) or 0
-    local originY = tonumber(safeIndex(self, "y")) or 0
+    -- self.x/self.y are relative to the parent; drawing needs absolute space.
+    local originX, originY = 0, 0
+    if type(self.getAbsoluteX) == "function" then
+        local okX, ax = pcall(self.getAbsoluteX, self)
+        local okY, ay = pcall(self.getAbsoluteY, self)
+        if okX and type(ax) == "number" then originX = ax end
+        if okY and type(ay) == "number" then originY = ay end
+    end
     local font = rawget(_G, "UIFont") and (UIFont.Small or UIFont.Medium) or nil
 
     local craftButton = safeIndex(getCraftControl(self), "buttonCraft")
