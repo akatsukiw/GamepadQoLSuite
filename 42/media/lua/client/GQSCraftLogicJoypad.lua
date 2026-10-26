@@ -28,10 +28,14 @@
 --   1. 输入槽位上的小箭头（打开右侧"可用物品"）只有鼠标点击
 --   2. "全部拿走"按钮没有手柄焦点
 
+-- TEMPORARY: set GQSDebugLog.lua craftLogic back to false once the material
+-- auto-add path is confirmed working in game.
+local LOG_CATEGORY = "craftLogic"
+
 local function log(message, isError)
     local logger = rawget(_G, "GQSLog")
     local fn = logger and (isError and logger.error or logger.log)
-    if type(fn) == "function" then fn("panelInfo", message) end
+    if type(fn) == "function" then fn(LOG_CATEGORY, message) end
 end
 
 pcall(require, "Entity/ISUI/Components/Crafting/ISCraftLogicPanel")
@@ -204,16 +208,79 @@ local function tryAddFirstMaterial(self)
             and not data.isHeader
             and not data.isNode
             and not data.isUnavailable
-            and not isAlreadyAssigned(self, data.inventoryItem) then
-            local ok, err = pcall(panel.onListItemClicked, panel, data)
-            if ok then
-                log("X: added an available material")
+            then
+            if isAlreadyAssigned(self, data.inventoryItem) then
+                log("X: skipping an already assigned material")
+            else
+                local ok, err = pcall(panel.onListItemClicked, panel, data)
+                if ok then
+                    log("X: added an available material")
+                    return true
+                end
+                log("X: adding the material failed: " .. tostring(err), true)
+                return false
+            end
+        end
+    end
+    return false
+end
+
+-- Diagnostic dump of the material list rows. The list only contains child rows
+-- for nodes that are currently expanded, so a freshly opened panel usually shows
+-- header + collapsed node and nothing else -- which is exactly why a plain
+-- "find a row with an inventory item" walk finds nothing.
+local function describeEntry(index, entry)
+    local data = entry and entry.item
+    if type(data) ~= "table" then return tostring(index) .. "=nodata" end
+    return string.format("%d[%s%s%s%s]", index,
+        data.isHeader and "H" or "-",
+        data.isNode and "N" or "-",
+        data.inventoryItem and "I" or "-",
+        data.isUnavailable and "U" or "-")
+end
+
+local function logListState(self, tag)
+    local list = safeIndex(safeIndex(self, "inventoryPanel"), "itemListBox")
+    if type(list) ~= "table" or type(list.items) ~= "table" then
+        log(tag .. ": no item list")
+        return
+    end
+    local parts = {}
+    for index, entry in ipairs(list.items) do
+        parts[#parts + 1] = describeEntry(index, entry)
+    end
+    log(tag .. ": " .. tostring(#list.items) .. " rows " .. table.concat(parts, " "))
+end
+
+-- A node row ("大型原始皮（湿）(4)") holds the script item, not an inventory
+-- item, and its children only appear once the node is expanded. Expanding it is
+-- what a double click on that row does, so do the same and repopulate.
+local function expandFirstNode(self)
+    local panel = safeIndex(self, "inventoryPanel")
+    local list = safeIndex(panel, "itemListBox")
+    if type(list) ~= "table" or type(list.items) ~= "table" then return false end
+
+    for index, entry in ipairs(list.items) do
+        local data = entry and entry.item
+        if type(data) == "table" and data.isNode and type(data.node) == "table" then
+            local node = data.node
+            local expanded = false
+            if type(node.setExpandedAvailable) == "function" then
+                local ok = pcall(node.setExpandedAvailable, node, true)
+                expanded = ok or expanded
+            end
+            if type(node.setExpandedUsed) == "function" then
+                pcall(node.setExpandedUsed, node, true)
+            end
+            log("X: expanding node row " .. tostring(index) .. " expanded=" .. tostring(expanded))
+            if expanded and type(panel.populate) == "function" then
+                pcall(panel.populate, panel)
                 return true
             end
-            log("X: adding the material failed: " .. tostring(err), true)
             return false
         end
     end
+    log("X: no node row found to expand")
     return false
 end
 
@@ -222,14 +289,22 @@ end
 -- point the mouse uses to add or remove one, so calling it directly gives us
 -- exactly the same behaviour as clicking the row -- no reimplementation.
 local function addFirstAvailableMaterial(self)
+    logListState(self, "X: before")
+
     if tryAddFirstMaterial(self) then return true end
 
-    -- The list is filled lazily in prerender, so a fresh panel can still be
-    -- empty on the frame the player presses X. Ask it to populate and retry.
+    -- Nothing addable at the top level: the node is collapsed. Expand it.
+    if expandFirstNode(self) then
+        logListState(self, "X: after expand")
+        if tryAddFirstMaterial(self) then return true end
+    end
+
+    -- Last resort: the list was never populated at all.
     local panel = safeIndex(self, "inventoryPanel")
     if type(panel) == "table" and type(panel.populate) == "function" then
-        local okPopulate = pcall(panel.populate, panel)
-        if okPopulate and tryAddFirstMaterial(self) then return true end
+        pcall(panel.populate, panel)
+        logListState(self, "X: after populate")
+        if tryAddFirstMaterial(self) then return true end
     end
 
     log("X: no unassigned material available")

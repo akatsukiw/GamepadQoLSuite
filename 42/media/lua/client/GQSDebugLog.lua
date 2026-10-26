@@ -20,6 +20,7 @@ local DEFAULT_CATEGORIES = {
     panelInfo = false,
     mixedAutoDrink = false,
     furnitureRotate = false, -- verified in game; enable to trace rotation decisions
+    craftLogic = true, -- TEMPORARY: tracing leather drying rack material auto-add
 }
 
 local LABELS = {
@@ -41,6 +42,7 @@ local LABELS = {
     panelInfo = "Panel Info Enhancement",
     mixedAutoDrink = "Mixed Auto Drink",
     furnitureRotate = "Furniture Rotate",
+    craftLogic = "Craft Logic Panel",
 }
 
 local config = rawget(_G, "GQS_DEBUG_CONFIG")
