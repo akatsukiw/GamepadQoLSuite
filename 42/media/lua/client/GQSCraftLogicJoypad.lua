@@ -177,11 +177,21 @@ end
 -- ---------------------------------------------------------------------------
 -- X: one key for "put the material in" and then "craft"
 -- ---------------------------------------------------------------------------
--- The material list is an ISScrollingListBox whose entries carry the real
--- inventory item. ISCraftInventoryPanel:onListItemClicked() is the single entry
--- point the mouse uses to add or remove one, so calling it directly gives us
--- exactly the same behaviour as clicking the row -- no reimplementation.
-local function addFirstAvailableMaterial(self)
+-- True when this inventory item is already sitting in an input slot. Pressing X
+-- again must move on to the next material instead of toggling the first one
+-- back out (onListItemClicked treats a second click as "remove").
+local function isAlreadyAssigned(self, inventoryItem)
+    local logic = safeIndex(getInputControl(self), "logic")
+    if not logic or type(logic.getRecipeData) ~= "function" then return false end
+    local okData, data = pcall(logic.getRecipeData, logic)
+    if not okData or type(data) ~= "table" or type(data.containsInputItem) ~= "function" then
+        return false
+    end
+    local ok, value = pcall(data.containsInputItem, data, inventoryItem)
+    return ok and value == true
+end
+
+local function tryAddFirstMaterial(self)
     local panel = safeIndex(self, "inventoryPanel")
     local list = safeIndex(panel, "itemListBox")
     if type(list) ~= "table" or type(list.items) ~= "table" then return false end
@@ -193,17 +203,36 @@ local function addFirstAvailableMaterial(self)
             and data.inventoryItem ~= nil
             and not data.isHeader
             and not data.isNode
-            and not data.isUnavailable then
+            and not data.isUnavailable
+            and not isAlreadyAssigned(self, data.inventoryItem) then
             local ok, err = pcall(panel.onListItemClicked, panel, data)
             if ok then
-                log("X: added the first available material")
+                log("X: added an available material")
                 return true
             end
-            log("X: adding the first material failed: " .. tostring(err), true)
+            log("X: adding the material failed: " .. tostring(err), true)
             return false
         end
     end
-    log("X: no available material to add")
+    return false
+end
+
+-- The material list is an ISScrollingListBox whose entries carry the real
+-- inventory item. ISCraftInventoryPanel:onListItemClicked() is the single entry
+-- point the mouse uses to add or remove one, so calling it directly gives us
+-- exactly the same behaviour as clicking the row -- no reimplementation.
+local function addFirstAvailableMaterial(self)
+    if tryAddFirstMaterial(self) then return true end
+
+    -- The list is filled lazily in prerender, so a fresh panel can still be
+    -- empty on the frame the player presses X. Ask it to populate and retry.
+    local panel = safeIndex(self, "inventoryPanel")
+    if type(panel) == "table" and type(panel.populate) == "function" then
+        local okPopulate = pcall(panel.populate, panel)
+        if okPopulate and tryAddFirstMaterial(self) then return true end
+    end
+
+    log("X: no unassigned material available")
     return false
 end
 
@@ -212,16 +241,11 @@ local function isCraftReady(self)
     return type(button) == "table" and button.enable ~= false
 end
 
--- Craft when the craft button is live, otherwise drop the first usable material
--- into the input slot. Standing inside the material list is left alone so X can
--- never remove something the player just placed.
+-- Craft when the craft button is live, otherwise drop the next usable material
+-- into an input slot. Works from the recipe list and from the material list.
 local function smartX(self, joypadData)
     if isCraftReady(self) then
         return craftNow(self)
-    end
-    local focus = joypadData and joypadData.focus
-    if focus ~= nil and focus == getInventoryList(self) then
-        return false
     end
     return addFirstAvailableMaterial(self)
 end
@@ -264,8 +288,12 @@ local function wrapRecipeList(self)
     list._gqsCraftLogicList = true
     list._gqsCraftLogicPanel = self
     list.onJoypadDown = function(listSelf, button, joypadData, ...)
+        -- X is consumed unconditionally. Letting it fall through when there is
+        -- no material to add is what made it reach the class-level favourite
+        -- toggle again, which is the bug this wrap exists to prevent.
         if isJoypadButton(button, "XButton", "X") then
-            if smartX(self, joypadData) then return end
+            smartX(self, joypadData)
+            return
         end
 
         local result = original(listSelf, button, joypadData, ...)
@@ -350,7 +378,10 @@ end
 local originalDownDescendant = CraftLogicPanel.onJoypadDown_Descendant
 CraftLogicPanel.onJoypadDown_Descendant = function(self, descendant, button, joypadData)
     if isJoypadButton(button, "XButton", "X") then
-        if smartX(self, joypadData) then return end
+        -- Consumed even when there is nothing to add, so the class-level
+        -- favourite toggle can never see it.
+        smartX(self, joypadData)
+        return
     elseif isJoypadButton(button, "YButton", "Y") then
         if takeAllOutputs(self) then return end
     end
@@ -466,7 +497,7 @@ local function drawHeaderHints(window)
 
     local parts = {
         { icon = { "RBumper", "RBButton", "RB" }, letter = "RB",
-          label = text("UI_GQOS_PanelSwitchArea", "切换面板区域") },
+          label = text("UI_GQOS_CraftLogicSwitchArea", "切换区域") },
         { icon = { "XButton" }, letter = "X", label = xLabel },
         { icon = { "YButton" }, letter = "Y",
           label = text("IGUI_invpage_Loot_all", "全部拿走") },
@@ -492,7 +523,10 @@ local function drawHeaderHints(window)
     local headerWidth = tonumber(safeIndex(header, "width")) or 300
     local headerHeight = tonumber(safeIndex(header, "height")) or 24
 
-    local startX = (hx - wx) + headerWidth - totalWidth - 12
+    -- Leave room for the vanilla info button that sits in the top-right corner
+    -- of the header, otherwise the hints run into it.
+    local INFO_BUTTON_CLEARANCE = 44
+    local startX = (hx - wx) + headerWidth - totalWidth - INFO_BUTTON_CLEARANCE
     local baselineY = (hy - wy) + (headerHeight - lineHeight) / 2
     local cursorX = startX
 
