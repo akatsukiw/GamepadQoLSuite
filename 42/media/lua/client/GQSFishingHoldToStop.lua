@@ -72,12 +72,6 @@ local function textureSize(texture, maxSize)
     return width, height
 end
 
-local function measureText(text, font)
-    local ok, width = pcall(function() return getTextManager():MeasureStringX(font, text) end)
-    if ok and type(width) == "number" then return width end
-    return #tostring(text or "") * 8
-end
-
 local function fontHeight(font)
     local ok, height = pcall(function() return getTextManager():getFontHeight(font) end)
     if ok and type(height) == "number" then return height end
@@ -213,13 +207,22 @@ end
 -- ---------------------------------------------------------------------------
 -- Bottom-right prompt with a hold ring
 -- ---------------------------------------------------------------------------
+-- Geometry follows ISButtonPrompt:prerender so the prompt lines up with the
+-- native A/B/RB prompts instead of a hardcoded pixel position:
+--   y1      = screenTop + (screenHeight - 64) - 16   -- bottom prompt band
+--   right   = screenLeft + screenWidth - 16          -- right column edge
+--   rowHgt  = 32, and the native B prompt sits on y1, RB on y1 - rowHgt.
+-- We use one row above RB so the vanilla prompts are never covered.
+local ROW_HGT = 32
+local BUTTON_WID = 32
+local TEXT_PAD_X = 11
+local RIGHT_MARGIN = 16
+local PROMPT_ICON_SIZE = 28
+local PROMPT_ROW_OFFSET = 2
+
 local RING_SEGMENTS = 28
-local RING_RADIUS = 12
+local RING_RADIUS = PROMPT_ICON_SIZE / 2 + PROMPT_ROW_OFFSET
 local RING_DOT = 2.6
-local PROMPT_ICON_SIZE = 18
-local PROMPT_GAP = 5
-local PROMPT_RIGHT_PADDING = 10
-local PROMPT_BOTTOM_PADDING = 7
 
 -- PZ has no arc primitive, so the ring is a circle of small filled squares. At
 -- this radius/segment count the dots touch, which reads as a solid ring.
@@ -240,27 +243,48 @@ local function drawHoldRing(element, centerX, centerY, progress)
     end
 end
 
+local function viewportFor(playerNum)
+    local left = type(getPlayerScreenLeft) == "function" and tonumber(getPlayerScreenLeft(playerNum)) or nil
+    local top = type(getPlayerScreenTop) == "function" and tonumber(getPlayerScreenTop(playerNum)) or nil
+    local width = type(getPlayerScreenWidth) == "function" and tonumber(getPlayerScreenWidth(playerNum)) or nil
+    local height = type(getPlayerScreenHeight) == "function" and tonumber(getPlayerScreenHeight(playerNum)) or nil
+    if not width or width <= 0 or not height or height <= 0 then
+        local core = rawget(_G, "getCore") and getCore() or nil
+        width = core and tonumber(safeCall(core, "getScreenWidth")) or 1280
+        height = core and tonumber(safeCall(core, "getScreenHeight")) or 720
+        left, top = 0, 0
+    end
+    return tonumber(left) or 0, tonumber(top) or 0, width, height
+end
+
 local function drawFishingPrompt(element)
     if not isEnabled() then return end
 
-    local player = element.player
+    -- ISButtonPrompt.player is the player *number*, not an IsoPlayer (see
+    -- ISPlayerDataObject.lua: ISButtonPrompt:new(self.id)). Reading it as an
+    -- object is what kept the prompt from ever drawing.
+    local playerNum = tonumber(element.player)
+    if playerNum == nil then return end
+
+    local player = type(getSpecificPlayer) == "function" and getSpecificPlayer(playerNum) or nil
     if not player then return end
+
+    local joypadId = tonumber(safeCall(player, "getJoypadBind"))
+    -- Keyboard players have no B button; the prompt would be misleading.
+    if joypadId == nil or joypadId < 0 then return end
+
+    -- With a focused panel B belongs to that panel, so the world prompt hides.
+    if hasPanelFocus(joypadId) then return end
+
     local manager = getManagerForPlayer(player)
     if not isFishingActive(manager) then
-        -- Nothing is being fished: drop any half-finished hold so the ring does
-        -- not linger on screen.
-        local bind = safeCall(player, "getJoypadBind")
-        if type(bind) == "number" then clearHold(bind) end
+        clearHold(joypadId)
         return
     end
 
-    local playerNum = tonumber(safeCall(player, "getPlayerNum")) or 0
-    local joypadId = tonumber(safeCall(player, "getJoypadBind")) or -1
-
-    local font = rawget(_G, "UIFont") and UIFont.Small or nil
+    local font = rawget(_G, "UIFont") and (UIFont.NewLarge or UIFont.Small) or nil
     if not font then return end
     local lineHeight = fontHeight(font)
-    local rowHeight = math.max(PROMPT_ICON_SIZE, lineHeight)
 
     local texture = getJoypadTexture("BButton")
     local iconW, iconH = textureSize(texture, PROMPT_ICON_SIZE)
@@ -268,39 +292,36 @@ local function drawFishingPrompt(element)
     if label == "UI_GQOS_FishingHoldToStop" or label == nil or label == "" then
         label = "长按退出"
     end
-    local textWidth = measureText(label, font)
 
-    -- ISButtonPrompt is anchored at the viewport origin, but stay defensive and
-    -- convert absolute coordinates the same way the other HUD hints do.
-    local promptX = tonumber(safeCall(element, "getAbsoluteX")) or tonumber(element.x) or 0
-    local promptY = tonumber(safeCall(element, "getAbsoluteY")) or tonumber(element.y) or 0
-    local screenLeft = type(getPlayerScreenLeft) == "function" and (tonumber(getPlayerScreenLeft(playerNum)) or 0) or 0
-    local screenTop = type(getPlayerScreenTop) == "function" and (tonumber(getPlayerScreenTop(playerNum)) or 0) or 0
-    local screenWidth = type(getPlayerScreenWidth) == "function" and (tonumber(getPlayerScreenWidth(playerNum)) or 0) or 0
-    local screenHeight = type(getPlayerScreenHeight) == "function" and (tonumber(getPlayerScreenHeight(playerNum)) or 0) or 0
-    if screenWidth <= 0 or screenHeight <= 0 then
-        local core = rawget(_G, "getCore") and getCore() or nil
-        screenWidth = core and (tonumber(safeCall(core, "getScreenWidth")) or 0) or 0
-        screenHeight = core and (tonumber(safeCall(core, "getScreenHeight")) or 0) or 0
-    end
+    local screenLeft, screenTop, screenWidth, screenHeight = viewportFor(playerNum)
 
-    local rightEdge = screenLeft + screenWidth - PROMPT_RIGHT_PADDING - promptX
-    local rowTop = screenTop + screenHeight - rowHeight - PROMPT_BOTTOM_PADDING - promptY
-    local leftX = rightEdge - (iconW + PROMPT_GAP + textWidth)
+    -- Same bottom band and right column the native prompts use, one row above
+    -- the RB prompt so nothing overlaps.
+    local y1 = screenTop + (screenHeight - 64) - 16
+    local rowTop = y1 - ROW_HGT * 2
+    local iconX = screenLeft + screenWidth - RIGHT_MARGIN - BUTTON_WID
 
-    local iconY = rowTop + math.floor((rowHeight - iconH) / 2)
-    local textY = rowTop + math.floor((rowHeight - lineHeight) / 2)
+    -- ISButtonPrompt sits at 0,0 but convert anyway, exactly like the other HUD
+    -- hints do, so this keeps working if the anchor ever changes.
+    local originX = tonumber(safeCall(element, "getAbsoluteX")) or 0
+    local originY = tonumber(safeCall(element, "getAbsoluteY")) or 0
+    local drawX = iconX - originX
+    local drawTop = rowTop - originY
+
+    local iconY = drawTop + math.floor((ROW_HGT - iconH) / 2)
+    local textY = drawTop + math.floor((ROW_HGT - lineHeight) / 2)
 
     if texture then
-        pcall(element.drawTextureScaled, element, texture, leftX, iconY, iconW, iconH, 1, 1, 1, 1)
+        pcall(element.drawTextureScaled, element, texture, drawX, iconY, iconW, iconH, 1, 1, 1, 1)
     else
-        pcall(element.drawText, element, "B", leftX, textY, 1, 1, 1, 1, font)
+        pcall(element.drawText, element, "B", drawX, textY, 1, 1, 1, 1, font)
     end
-    pcall(element.drawText, element, label, leftX + iconW + PROMPT_GAP, textY, 0.90, 0.90, 0.90, 1, font)
+    -- Right-aligned label, matching the native bPrompt / rbPrompt layout.
+    pcall(element.drawTextRight, element, label, drawX - TEXT_PAD_X, textY, 0.90, 0.90, 0.90, 1, font)
 
-    local progress = joypadId >= 0 and holdProgress[joypadId] or nil
+    local progress = holdProgress[joypadId]
     if type(progress) == "number" and progress > 0 then
-        drawHoldRing(element, leftX + iconW / 2, iconY + iconH / 2, progress)
+        drawHoldRing(element, drawX + iconW / 2, iconY + iconH / 2, progress)
     end
 end
 
