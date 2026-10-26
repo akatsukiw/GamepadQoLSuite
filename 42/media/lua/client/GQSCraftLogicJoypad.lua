@@ -142,15 +142,35 @@ local function toggleInputPicker(self)
 end
 
 -- Opens the picker (or reuses it if already open) and moves focus to the
--- material list, so the next A puts the item in.
+-- material list, so the next A puts the item in. The visibility of the list is
+-- driven by the logic flag, not by isReallyVisible(): the java object only
+-- reports visible after a render pass, so checking it here would skip the focus
+-- jump on the very frame the picker opens.
 local function openInputPicker(self, joypadData)
     if not isManualPickerShown(self) then
         if not toggleInputPicker(self) then return false end
     end
-    local inventoryList = getInventoryList(self)
-    if isReallyVisible(inventoryList) then
-        setFocus(joypadData, inventoryList)
+    setFocus(joypadData, getInventoryList(self))
+    return true
+end
+
+-- ---------------------------------------------------------------------------
+-- Crafting straight from the material list
+-- ---------------------------------------------------------------------------
+local function craftNow(self)
+    local button = safeIndex(getCraftControl(self), "buttonCraft")
+    if type(button) ~= "table" then return false end
+    if button.enable == false then
+        log("X: craft button is disabled (missing materials or already running)")
+        return false
     end
+    if type(button.forceClick) ~= "function" then return false end
+    local ok, err = pcall(button.forceClick, button)
+    if not ok then
+        log("X: craft failed: " .. tostring(err), true)
+        return false
+    end
+    log("X: started crafting")
     return true
 end
 
@@ -229,6 +249,13 @@ local originalGainFocus = CraftLogicPanel.onGainJoypadFocus
 CraftLogicPanel.onGainJoypadFocus = function(self, joypadData)
     if type(originalGainFocus) == "function" then pcall(originalGainFocus, self, joypadData) end
     wrapRecipeList(self)
+
+    -- The material column is the first thing a player needs here, so open it up
+    -- front instead of making them press A twice before it appears.
+    if not isManualPickerShown(self) then
+        toggleInputPicker(self)
+    end
+
     if setFocus(joypadData, getRecipeList(self)) then
         log("focus handed to the recipe list")
     else
@@ -256,11 +283,13 @@ CraftLogicPanel.onJoypadNavigateStart_Descendant = function(self, descendant, jo
             down = takeButton,
         }
     end
+    if takeButton then
+        -- Up goes back to the craft button (not the recipe list), left returns
+        -- to the recipe list, right reaches the contained-items column.
+        takeButton.joypadNavigate = { up = craftControl, left = recipeList, right = containedList }
+    end
     if inventoryList then
         inventoryList.joypadNavigate = { left = craftControl, down = containedList }
-    end
-    if takeButton then
-        takeButton.joypadNavigate = { up = recipeList, right = containedList }
     end
     if containedList then
         containedList.joypadNavigate = { up = inventoryList, left = takeButton }
@@ -274,6 +303,13 @@ end
 local originalDownDescendant = CraftLogicPanel.onJoypadDown_Descendant
 CraftLogicPanel.onJoypadDown_Descendant = function(self, descendant, button, joypadData)
     if isJoypadButton(button, "XButton", "X") then
+        local focus = joypadData and joypadData.focus
+        -- Already standing in the material column: X means "craft now", not
+        -- "toggle the picker I am looking at".
+        if focus ~= nil and focus == getInventoryList(self) then
+            craftNow(self)
+            return
+        end
         if toggleInputPicker(self) then
             if isManualPickerShown(self) then
                 setFocus(joypadData, getInventoryList(self))
