@@ -176,6 +176,7 @@ if options then
     options:addSeparator()
     options:addTitle("UI_GQOS_MiscFeaturesTitle")
     GQS.mixedLiquidAutoDrinkEnabled = options:addTickBox("mixedLiquidAutoDrinkEnabled", "UI_GQOS_MixedLiquidAutoDrinkEnabled", true, "UI_GQOS_MixedLiquidAutoDrinkEnabled_tooltip")
+    GQS.fishingHoldToStopEnabled = options:addTickBox("fishingHoldToStopEnabled", "UI_GQOS_FishingHoldToStopEnabled", true, "UI_GQOS_FishingHoldToStopEnabled_tooltip")
     GQS.selectWheelPvpOptionEnabled = options:addTickBox("selectWheelPvpOptionEnabled", "UI_GQOS_SelectWheelPvpOptionEnabled", false, "UI_GQOS_SelectWheelPvpOptionEnabled_tooltip")
     GQS.disableSmashWindowBEnabled = options:addTickBox("disableSmashWindowBEnabled", "UI_GQOS_DisableSmashWindowBEnabled", false, "UI_GQOS_DisableSmashWindowBEnabled_tooltip")
 end
