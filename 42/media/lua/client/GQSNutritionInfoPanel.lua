@@ -481,7 +481,11 @@ if Events and Events.OnTick then
         local CharacterScreen = rawget(_G, "ISCharacterScreen")
         if not CharacterScreen or not CharacterScreen._gqsNutritionInfoInstalled then install() end
         if not isFeatureEnabled() then
-            if next(openScreens) ~= nil then closeOpenPanels() end
+            -- Do not guard this with next(openScreens): PZ's Kahlua does not
+            -- expose the global next() function, so the call raised
+            -- "Object tried to call nil" every tick once the option was turned
+            -- off. closeOpenPanels() already does nothing on an empty table.
+            closeOpenPanels()
             return
         end
         local screens = {}

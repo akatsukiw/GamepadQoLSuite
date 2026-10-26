@@ -804,7 +804,11 @@ if Events and Events.OnTick then
         local CharacterScreen = rawget(_G, "ISCharacterScreen")
         if not CharacterScreen or not CharacterScreen._gqsTraitInfoGamepadInstalled then install() end
         if not isFeatureEnabled() then
-            if next(openScreens) ~= nil then closeOpenPanels() end
+            -- PZ's Kahlua does not expose the global next(), so guarding this
+            -- with next(openScreens) threw "Object tried to call nil" every
+            -- tick once the option was switched off. closeOpenPanels() is
+            -- already a no-op on an empty table.
+            closeOpenPanels()
             return
         end
         local screens = {}
