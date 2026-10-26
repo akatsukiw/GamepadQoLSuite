@@ -128,6 +128,7 @@
     "UI_GQOS_FishingHoldToStopEnabled": "Hold B to stop fishing",
     "UI_GQOS_FishingHoldToStopEnabled_tooltip": "A single B press no longer stops fishing; hold it for 0.5 seconds instead.\nWhile a panel has focus, B only closes the panel -- it never cancels fishing or wears the line.\nA prompt appears in the bottom-right corner while fishing, with a progress ring around the B icon as you hold.\nWhen disabled, vanilla behavior returns: one B press stops fishing immediately.",
     "UI_GQOS_FishingHoldToStop": "Hold to stop",
+    "UI_GQOS_CraftLogicQuickAdd": "Quick add",
     "UI_GQOS_splitInvLootWidth": "Split-screen combined container width %% of viewport",
     "UI_GQOS_splitInvLootWidth_tooltip": "Applied separately to each player viewport in split screen. Default is 100%%; solo width settings remain independent.",
     "UI_GQOS_splitContainerHeight": "Split-screen container height %% of viewport",

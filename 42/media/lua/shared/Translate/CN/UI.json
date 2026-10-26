@@ -128,6 +128,7 @@
     "UI_GQOS_FishingHoldToStopEnabled": "长按 B 退出钓鱼",
     "UI_GQOS_FishingHoldToStopEnabled_tooltip": "钓鱼时按一下 B 不再立刻退出，改为按住 0.5 秒退出。\n焦点在面板上时按 B 只关闭面板，不会取消钓鱼，也不会磨损鱼线。\n钓鱼时右下角会显示按键提示，长按过程中 B 图标外会出现进度圆环。\n关闭后恢复原版：按一下 B 立即退出钓鱼。",
     "UI_GQOS_FishingHoldToStop": "长按退出",
+    "UI_GQOS_CraftLogicQuickAdd": "快速放入",
     "UI_GQOS_splitInvLootWidth": "分屏模式容器 UI 总宽度（屏幕百分比）",
     "UI_GQOS_splitInvLootWidth_tooltip": "分屏时按每位玩家自己的屏幕区域计算；默认 100%，单人宽度设置不受影响。",
     "UI_GQOS_splitContainerHeight": "分屏模式容器 UI 高度（屏幕百分比）",

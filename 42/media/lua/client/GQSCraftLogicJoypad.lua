@@ -175,6 +175,58 @@ local function craftNow(self)
 end
 
 -- ---------------------------------------------------------------------------
+-- X: one key for "put the material in" and then "craft"
+-- ---------------------------------------------------------------------------
+-- The material list is an ISScrollingListBox whose entries carry the real
+-- inventory item. ISCraftInventoryPanel:onListItemClicked() is the single entry
+-- point the mouse uses to add or remove one, so calling it directly gives us
+-- exactly the same behaviour as clicking the row -- no reimplementation.
+local function addFirstAvailableMaterial(self)
+    local panel = safeIndex(self, "inventoryPanel")
+    local list = safeIndex(panel, "itemListBox")
+    if type(list) ~= "table" or type(list.items) ~= "table" then return false end
+    if type(panel.onListItemClicked) ~= "function" then return false end
+
+    for _, entry in ipairs(list.items) do
+        local data = entry and entry.item
+        if type(data) == "table"
+            and data.inventoryItem ~= nil
+            and not data.isHeader
+            and not data.isNode
+            and not data.isUnavailable then
+            local ok, err = pcall(panel.onListItemClicked, panel, data)
+            if ok then
+                log("X: added the first available material")
+                return true
+            end
+            log("X: adding the first material failed: " .. tostring(err), true)
+            return false
+        end
+    end
+    log("X: no available material to add")
+    return false
+end
+
+local function isCraftReady(self)
+    local button = safeIndex(getCraftControl(self), "buttonCraft")
+    return type(button) == "table" and button.enable ~= false
+end
+
+-- Craft when the craft button is live, otherwise drop the first usable material
+-- into the input slot. Standing inside the material list is left alone so X can
+-- never remove something the player just placed.
+local function smartX(self, joypadData)
+    if isCraftReady(self) then
+        return craftNow(self)
+    end
+    local focus = joypadData and joypadData.focus
+    if focus ~= nil and focus == getInventoryList(self) then
+        return false
+    end
+    return addFirstAvailableMaterial(self)
+end
+
+-- ---------------------------------------------------------------------------
 -- Y: take everything out of the output slots
 -- ---------------------------------------------------------------------------
 local function takeAllOutputs(self)
@@ -213,12 +265,7 @@ local function wrapRecipeList(self)
     list._gqsCraftLogicPanel = self
     list.onJoypadDown = function(listSelf, button, joypadData, ...)
         if isJoypadButton(button, "XButton", "X") then
-            if toggleInputPicker(self) then
-                if isManualPickerShown(self) then
-                    setFocus(joypadData, getInventoryList(self))
-                end
-                return
-            end
+            if smartX(self, joypadData) then return end
         end
 
         local result = original(listSelf, button, joypadData, ...)
@@ -303,19 +350,7 @@ end
 local originalDownDescendant = CraftLogicPanel.onJoypadDown_Descendant
 CraftLogicPanel.onJoypadDown_Descendant = function(self, descendant, button, joypadData)
     if isJoypadButton(button, "XButton", "X") then
-        local focus = joypadData and joypadData.focus
-        -- Already standing in the material column: X means "craft now", not
-        -- "toggle the picker I am looking at".
-        if focus ~= nil and focus == getInventoryList(self) then
-            craftNow(self)
-            return
-        end
-        if toggleInputPicker(self) then
-            if isManualPickerShown(self) then
-                setFocus(joypadData, getInventoryList(self))
-            end
-            return
-        end
+        if smartX(self, joypadData) then return end
     elseif isJoypadButton(button, "YButton", "Y") then
         if takeAllOutputs(self) then return end
     end
@@ -323,6 +358,163 @@ CraftLogicPanel.onJoypadDown_Descendant = function(self, descendant, button, joy
     if type(originalDownDescendant) == "function" then
         return originalDownDescendant(self, descendant, button, joypadData)
     end
+end
+
+-- ---------------------------------------------------------------------------
+-- On-screen key hints
+-- ---------------------------------------------------------------------------
+local PROMPT_ICON_SIZE = 18
+
+local function getJoypadTexture(names)
+    local joypad = rawget(_G, "Joypad")
+    local textures = joypad and joypad.Texture
+    if not textures then return nil end
+    for _, name in ipairs(names) do
+        if textures[name] then return textures[name] end
+    end
+    return nil
+end
+
+local function text(key, fallback)
+    local value = type(getText) == "function" and getText(key) or nil
+    if type(value) ~= "string" or value == "" or value == key then return fallback end
+    return value
+end
+
+-- Draws one key glyph centred on (centerX, centerY).
+local function drawKeyGlyph(element, textureNames, fallbackLetter, centerX, centerY, font)
+    local texture = getJoypadTexture(textureNames)
+    local x = centerX - PROMPT_ICON_SIZE / 2
+    local y = centerY - PROMPT_ICON_SIZE / 2
+    if texture then
+        pcall(element.drawTextureScaled, element, texture, x, y,
+            PROMPT_ICON_SIZE, PROMPT_ICON_SIZE, 1, 1, 1, 1)
+    elseif fallbackLetter then
+        local ok = pcall(element.drawText, element, fallbackLetter, x + 4, y + 2, 1, 1, 1, 1, font)
+        if not ok then
+            pcall(element.drawText, element, fallbackLetter, x + 4, y + 2, 1, 1, 1, 1)
+        end
+    end
+end
+
+-- X next to the craft button, Y next to "take all". Both use absolute
+-- coordinates converted into this panel's space, so they follow the real
+-- button positions instead of guessing offsets.
+local function drawButtonPrompts(self)
+    local originX = tonumber(safeIndex(self, "x")) or 0
+    local originY = tonumber(safeIndex(self, "y")) or 0
+    local font = rawget(_G, "UIFont") and (UIFont.Small or UIFont.Medium) or nil
+
+    local craftButton = safeIndex(getCraftControl(self), "buttonCraft")
+    if type(craftButton) == "table" and craftButton.enable ~= false
+        and type(craftButton.getAbsoluteX) == "function" then
+        local okX, bx = pcall(craftButton.getAbsoluteX, craftButton)
+        local okY, by = pcall(craftButton.getAbsoluteY, craftButton)
+        local bh = tonumber(safeIndex(craftButton, "height")) or 20
+        if okX and okY and type(bx) == "number" and type(by) == "number" then
+            drawKeyGlyph(self, { "XButton" }, "X",
+                bx - originX - 14, by - originY + bh / 2, font)
+        end
+    end
+
+    local takeButton = getTakeButton(self)
+    if type(takeButton) == "table" and type(takeButton.getAbsoluteX) == "function" then
+        local okX, bx = pcall(takeButton.getAbsoluteX, takeButton)
+        local okY, by = pcall(takeButton.getAbsoluteY, takeButton)
+        local bw = tonumber(safeIndex(takeButton, "width")) or 60
+        local bh = tonumber(safeIndex(takeButton, "height")) or 20
+        if okX and okY and type(bx) == "number" and type(by) == "number" then
+            drawKeyGlyph(self, { "YButton" }, "Y",
+                bx - originX + bw + 14, by - originY + bh / 2, font)
+        end
+    end
+end
+
+-- The window title bar has plenty of empty space, so the whole key map goes
+-- there: RB switch area / X quick add or craft / Y take all / B close.
+-- X's label follows the craft button state, exactly like the button itself.
+local function findCraftLogicPanel(window)
+    local componentsPanel = safeIndex(window, "componentsPanel")
+    local panels = safeIndex(componentsPanel, "panels")
+    if type(panels) ~= "table" then return nil end
+    for _, info in ipairs(panels) do
+        local panel = safeIndex(info, "panel")
+        if type(panel) == "table" and panel._gqsCraftLogicJoypadInstalled then
+            return panel
+        end
+    end
+    return nil
+end
+
+local function drawHeaderHints(window)
+    local panel = findCraftLogicPanel(window)
+    if not panel then return end
+    local header = safeIndex(window, "entityHeader")
+    if type(header) ~= "table" or type(header.getAbsoluteX) ~= "function" then return end
+
+    local font = rawget(_G, "UIFont") and (UIFont.Small or UIFont.Medium) or nil
+    if not font or type(getTextManager) ~= "function" then return end
+    local manager = getTextManager()
+    local lineHeight = manager:getFontHeight(font)
+    local iconSize = 16
+    local iconGap = 4
+    local blockGap = 14
+
+    local xLabel = isCraftReady(panel)
+        and text("IGUI_CraftingWindow_Craft", "制作")
+        or text("UI_GQOS_CraftLogicQuickAdd", "快速放入")
+
+    local parts = {
+        { icon = { "RBumper", "RBButton", "RB" }, letter = "RB",
+          label = text("UI_GQOS_PanelSwitchArea", "切换面板区域") },
+        { icon = { "XButton" }, letter = "X", label = xLabel },
+        { icon = { "YButton" }, letter = "Y",
+          label = text("IGUI_invpage_Loot_all", "全部拿走") },
+        { icon = { "BButton" }, letter = "B",
+          label = text("UI_GQOS_PanelClose", "关闭") },
+    }
+
+    -- Measure first, then right-align inside the header.
+    local totalWidth = 0
+    for index, part in ipairs(parts) do
+        part.width = iconSize + iconGap + manager:MeasureStringX(font, part.label)
+        totalWidth = totalWidth + part.width
+        if index < #parts then totalWidth = totalWidth + blockGap end
+    end
+
+    local okHX, hx = pcall(header.getAbsoluteX, header)
+    local okHY, hy = pcall(header.getAbsoluteY, header)
+    if not okHX or not okHY or type(hx) ~= "number" or type(hy) ~= "number" then return end
+    local okWX, wx = pcall(window.getAbsoluteX, window)
+    local okWY, wy = pcall(window.getAbsoluteY, window)
+    if not okWX or not okWY or type(wx) ~= "number" or type(wy) ~= "number" then return end
+
+    local headerWidth = tonumber(safeIndex(header, "width")) or 300
+    local headerHeight = tonumber(safeIndex(header, "height")) or 24
+
+    local startX = (hx - wx) + headerWidth - totalWidth - 12
+    local baselineY = (hy - wy) + (headerHeight - lineHeight) / 2
+    local cursorX = startX
+
+    for _, part in ipairs(parts) do
+        drawKeyGlyph(window, part.icon, part.letter,
+            cursorX + iconSize / 2, baselineY + lineHeight / 2, font)
+        cursorX = cursorX + iconSize + iconGap
+        pcall(window.drawText, window, part.label, cursorX, baselineY, 0.9, 0.9, 0.9, 1, font)
+        cursorX = cursorX + manager:MeasureStringX(font, part.label) + blockGap
+    end
+end
+
+local EntityWindow = rawget(_G, "ISEntityWindow")
+if type(EntityWindow) == "table" and type(EntityWindow.render) == "function"
+    and not EntityWindow._gqsCraftLogicHeaderHints then
+    local originalEntityRender = EntityWindow.render
+    EntityWindow.render = function(self, ...)
+        local result = { originalEntityRender(self, ...) }
+        pcall(drawHeaderHints, self)
+        return unpack(result)
+    end
+    EntityWindow._gqsCraftLogicHeaderHints = true
 end
 
 -- Same arrow overlay the vanilla Build / Handcraft panels draw while RB is
@@ -333,6 +525,7 @@ CraftLogicPanel.render = function(self, ...)
     if type(self.renderJoypadNavigateOverlay) == "function" then
         pcall(self.renderJoypadNavigateOverlay, self, getPlayerNum(self))
     end
+    pcall(drawButtonPrompts, self)
 end
 
 CraftLogicPanel._gqsCraftLogicJoypadInstalled = true
