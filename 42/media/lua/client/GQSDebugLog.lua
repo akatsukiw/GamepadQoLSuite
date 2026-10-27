@@ -20,7 +20,7 @@ local DEFAULT_CATEGORIES = {
     panelInfo = false,
     mixedAutoDrink = false,
     furnitureRotate = false, -- verified in game; enable to trace rotation decisions
-    craftLogic = true, -- TEMPORARY: tracing leather drying rack material auto-add
+    craftLogic = false, -- leather drying rack joypad; flip to true to trace auto-add
 }
 
 local LABELS = {

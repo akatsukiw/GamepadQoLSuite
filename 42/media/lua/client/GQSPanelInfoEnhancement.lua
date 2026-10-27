@@ -526,6 +526,34 @@ local function findRecipeFilterPanel(window)
     return visit(window, 0)
 end
 
+-- L3 cycles the recipe sort order, same behaviour as the CraftLogic panel.
+-- ISComboBox:select() only assigns `selected` without firing the change
+-- callback, so OnClickSortType has to be invoked by hand.
+local function cycleSortMode(window)
+    local filter = findRecipeFilterPanel(window)
+    local combo = filter and filter.sortCombo
+    if type(combo) ~= "table" then return false end
+    local options = combo.options
+    if type(options) ~= "table" or #options == 0 then return false end
+    local selected = tonumber(combo.selected) or 0
+    selected = selected % #options + 1
+    combo.selected = selected
+    if type(filter.OnClickSortType) == "function" then
+        local ok, err = pcall(filter.OnClickSortType, filter, combo)
+        if not ok then
+            log("L3 sort cycle failed: " .. tostring(err), true)
+            return false
+        end
+    end
+    log("L3 sort mode -> " .. tostring(selected) .. "/" .. tostring(#options))
+    return true
+end
+
+local function isStickPress(button, name)
+    local joypad = rawget(_G, "Joypad")
+    return joypad ~= nil and joypad[name] ~= nil and button == joypad[name]
+end
+
 local function toggleShowAllPanelItems(window)
     if not isEnabled() then return false end
     local filter, tickBox, filterKind = findRecipeFilterPanel(window)
@@ -569,6 +597,7 @@ local function drawRecipeFavoritePrompt(header, window)
     local yTexture = getJoypadTexture({ "YButton" })
     local bTexture = getJoypadTexture({ "BButton" })
     local rbTexture = getJoypadTexture({ "RBumper", "RBButton" })
+    local lstickTexture = getJoypadTexture({ "LStick", "AnalogueL", "L3" })
     local rtTexture, rtTextureName = getRightTriggerTexture()
     local dpad = {
         up = getJoypadTexture({ "DPadUp", "DpadUp", "UpArrow" }),
@@ -600,6 +629,7 @@ local function drawRecipeFavoritePrompt(header, window)
     local rbLabel = type(getText) == "function" and getText("UI_GQOS_PanelSwitchArea") or "Switch panel area"
     local pageLabel = type(getText) == "function" and getText("UI_GQOS_PanelRecipePage") or "Page"
     local closeLabel = type(getText) == "function" and getText("UI_GQOS_PanelClose") or "Close"
+    local sortLabel = type(getText) == "function" and getText("UI_GQOS_PanelSort") or "Sort"
     local groups = {}
     local function token(texture, fallback)
         return { texture = texture, fallback = fallback }
@@ -612,6 +642,7 @@ local function drawRecipeFavoritePrompt(header, window)
         groups[#groups + 1] = tokens
     end
     addGroup({ token(rbTexture, "RB"), txt(rbLabel) })
+    addGroup({ token(lstickTexture, "L3"), txt(sortLabel) })
     addGroup({ token(rtTexture, "RT"), txt("+"), token(dpad.up, "↑"), txt("/"), token(dpad.down, "↓"), txt(pageLabel) })
     if favoriteLabel then addGroup({ token(xTexture, "X"), txt(favoriteLabel) }) end
     if showAllLabel then addGroup({ token(yTexture, "Y"), txt(showAllLabel) }) end
@@ -620,7 +651,9 @@ local function drawRecipeFavoritePrompt(header, window)
     local ok, manager = pcall(getTextManager)
     if not ok or not manager then return end
     local height = header:getHeight()
-    local iconSize = math.max(14, math.min(20, height - 6))
+    -- Match the leather-drying panel: 24px is readable, and the header is tall
+    -- enough for it on both the build and handcraft windows.
+    local iconSize = math.max(14, math.min(24, height - 4))
     local tokenGap, groupGap, totalWidth = 5, 18, 0
     local lineHeight = manager:MeasureStringY(font, "Ag")
     for groupIndex, parts in ipairs(groups) do
@@ -687,6 +720,7 @@ local function installShowAllYControl(windowClass)
     if type(original) ~= "function" then return end
     windowClass.onJoypadDown_Descendant = function(self, descendant, button, joypadData, ...)
         if isYButton(button) and toggleShowAllPanelItems(self) then return end
+        if isStickPress(button, "LStickButton") and cycleSortMode(self) then return end
         return original(self, descendant, button, joypadData, ...)
     end
     windowClass._gqsPanelShowAllYInstalled = true
