@@ -130,6 +130,7 @@
     "UI_GQOS_FishingHoldToStop": "长按退出",
     "UI_GQOS_CraftLogicQuickAdd": "快速放入",
     "UI_GQOS_CraftLogicSwitchArea": "切换区域",
+    "UI_GQOS_CraftLogicTakeBack": "取回",
     "UI_GQOS_splitInvLootWidth": "分屏模式容器 UI 总宽度（屏幕百分比）",
     "UI_GQOS_splitInvLootWidth_tooltip": "分屏时按每位玩家自己的屏幕区域计算；默认 100%，单人宽度设置不受影响。",
     "UI_GQOS_splitContainerHeight": "分屏模式容器 UI 高度（屏幕百分比）",

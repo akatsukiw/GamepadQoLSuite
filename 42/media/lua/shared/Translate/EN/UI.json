@@ -130,6 +130,7 @@
     "UI_GQOS_FishingHoldToStop": "Hold to stop",
     "UI_GQOS_CraftLogicQuickAdd": "Quick add",
     "UI_GQOS_CraftLogicSwitchArea": "Switch area",
+    "UI_GQOS_CraftLogicTakeBack": "Take back",
     "UI_GQOS_splitInvLootWidth": "Split-screen combined container width %% of viewport",
     "UI_GQOS_splitInvLootWidth_tooltip": "Applied separately to each player viewport in split screen. Default is 100%%; solo width settings remain independent.",
     "UI_GQOS_splitContainerHeight": "Split-screen container height %% of viewport",

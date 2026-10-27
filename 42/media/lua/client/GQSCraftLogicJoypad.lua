@@ -55,6 +55,11 @@ local function safeIndex(object, key)
     return nil
 end
 
+local function isStickPress(button, name)
+    local joypad = rawget(_G, "Joypad")
+    return joypad ~= nil and joypad[name] ~= nil and button == joypad[name]
+end
+
 local function isJoypadButton(button, name, fallbackKey)
     local joypad = rawget(_G, "Joypad")
     if joypad and joypad[name] ~= nil and button == joypad[name] then return true end
@@ -327,6 +332,80 @@ local function smartX(self, joypadData)
 end
 
 -- ---------------------------------------------------------------------------
+-- L3: cycle the recipe sort order (the sort combo box itself)
+-- ---------------------------------------------------------------------------
+-- ISComboBox:select() only sets `selected`, it never fires the change callback,
+-- so OnClickSortType has to be called by hand. That callback is what reaches
+-- setSortMode() on this panel.
+local function cycleSortMode(self)
+    local filterPanel = safeIndex(safeIndex(self, "recipesPanel"), "recipeFilterPanel")
+    local combo = safeIndex(filterPanel, "sortCombo")
+    if type(combo) ~= "table" then
+        log("L3: no sort combo box on this panel")
+        return false
+    end
+    local options = safeIndex(combo, "options")
+    if type(options) ~= "table" or #options == 0 then
+        log("L3: sort combo has no options yet")
+        return false
+    end
+
+    local selected = tonumber(safeIndex(combo, "selected")) or 0
+    selected = selected % #options + 1
+    combo.selected = selected
+
+    if type(filterPanel.OnClickSortType) == "function" then
+        local ok, err = pcall(filterPanel.OnClickSortType, filterPanel, combo)
+        if not ok then
+            log("L3: applying the sort mode failed: " .. tostring(err), true)
+            return false
+        end
+    end
+
+    local label = ""
+    local option = options[selected]
+    if type(option) == "table" and option.text ~= nil then label = tostring(option.text) end
+    log("L3: sort mode -> " .. tostring(selected) .. "/" .. tostring(#options) .. " " .. label)
+    return true
+end
+
+-- ---------------------------------------------------------------------------
+-- R3: take back everything sitting in the "contained items" column
+-- ---------------------------------------------------------------------------
+-- That column is an ISCraftInventoryPanel with isResourceItemSlot = true, so
+-- onListItemClicked takes the ItemSlotRemoveSingleItem branch. Walk it
+-- backwards so removing rows cannot shift the ones we have not visited yet.
+local function takeBackAllContained(self)
+    local panel = safeIndex(self, "resourceInventoryPanel")
+    local list = safeIndex(panel, "itemListBox")
+    if type(list) ~= "table" or type(list.items) ~= "table" then
+        log("R3: no contained items list")
+        return false
+    end
+    if type(panel.onListItemClicked) ~= "function" then return false end
+
+    local taken = 0
+    for index = #list.items, 1, -1 do
+        local data = list.items[index] and list.items[index].item
+        if type(data) == "table"
+            and data.inventoryItem ~= nil
+            and not data.isHeader
+            and not data.isNode
+            and not data.isUnavailable then
+            local ok = pcall(panel.onListItemClicked, panel, data)
+            if ok then taken = taken + 1 end
+        end
+    end
+
+    if taken == 0 then
+        log("R3: contained items column is empty")
+        return false
+    end
+    log("R3: took back " .. tostring(taken) .. " contained item(s)")
+    return true
+end
+
+-- ---------------------------------------------------------------------------
 -- Y: take everything out of the output slots
 -- ---------------------------------------------------------------------------
 local function takeAllOutputs(self)
@@ -460,6 +539,12 @@ CraftLogicPanel.onJoypadDown_Descendant = function(self, descendant, button, joy
         return
     elseif isJoypadButton(button, "YButton", "Y") then
         if takeAllOutputs(self) then return end
+    elseif isStickPress(button, "LStickButton") then
+        cycleSortMode(self)
+        return
+    elseif isStickPress(button, "RStickButton") then
+        takeBackAllContained(self)
+        return
     end
 
     if type(originalDownDescendant) == "function" then
@@ -530,6 +615,19 @@ local function drawButtonPrompts(self)
         end
     end
 
+    -- L3 sits in the empty space just left of the sort combo box.
+    local filterPanel = safeIndex(safeIndex(self, "recipesPanel"), "recipeFilterPanel")
+    local sortCombo = safeIndex(filterPanel, "sortCombo")
+    if type(sortCombo) == "table" and type(sortCombo.getAbsoluteX) == "function" then
+        local okX, sx = pcall(sortCombo.getAbsoluteX, sortCombo)
+        local okY, sy = pcall(sortCombo.getAbsoluteY, sortCombo)
+        local sh = tonumber(safeIndex(sortCombo, "height")) or 20
+        if okX and okY and type(sx) == "number" and type(sy) == "number" then
+            drawKeyGlyph(self, { "LStick", "AnalogueL", "L3" }, "L3",
+                sx - originX - 14, sy - originY + sh / 2, font)
+        end
+    end
+
     local takeButton = getTakeButton(self)
     if type(takeButton) == "table" and type(takeButton.getAbsoluteX) == "function" then
         local okX, bx = pcall(takeButton.getAbsoluteX, takeButton)
@@ -581,8 +679,10 @@ local function drawHeaderHints(window)
         { icon = { "RBumper", "RBButton", "RB" }, letter = "RB",
           label = text("UI_GQOS_CraftLogicSwitchArea", "切换区域") },
         { icon = { "XButton" }, letter = "X", label = xLabel },
-        { icon = { "YButton" }, letter = "Y",
-          label = text("IGUI_invpage_Loot_all", "全部拿走") },
+        -- Y is already shown right next to the "take all" button itself, so it
+        -- does not need a second copy up here.
+        { icon = { "RStick", "AnalogueR", "R3" }, letter = "R3",
+          label = text("UI_GQOS_CraftLogicTakeBack", "取回") },
         { icon = { "BButton" }, letter = "B",
           label = text("UI_GQOS_PanelClose", "关闭") },
     }
