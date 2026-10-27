@@ -23,9 +23,6 @@ local function log(message, isError)
     if type(fn) == "function" then fn(LOG_CATEGORY, message) end
 end
 
--- Forward declaration: update() and onGainJoypadFocus() call this, but its body
--- lives further down next to the other drawing helpers.
-local installContainedHint
 
 pcall(require, "Entity/ISUI/Components/Crafting/ISCraftLogicPanel")
 
@@ -459,18 +456,15 @@ CraftLogicPanel.update = function(self, ...)
     if type(originalUpdate) == "function" then
         local result = { originalUpdate(self, ...) }
         wrapRecipeList(self)
-        installContainedHint(self)
         return unpack(result)
     end
     wrapRecipeList(self)
-    installContainedHint(self)
 end
 
 local originalGainFocus = CraftLogicPanel.onGainJoypadFocus
 CraftLogicPanel.onGainJoypadFocus = function(self, joypadData)
     if type(originalGainFocus) == "function" then pcall(originalGainFocus, self, joypadData) end
     wrapRecipeList(self)
-    installContainedHint(self)
 
     -- The material column is the first thing a player needs here, so open it up
     -- front instead of making them press A twice before it appears.
@@ -757,14 +751,11 @@ local function drawHeaderHints(window)
     end
 end
 
--- "Contained items" column: show an R3 hint in that column's own bottom-left
--- corner whenever something can be taken back.
+-- "Contained items" column: an R3 hint in that column's bottom-left corner.
 --
--- This has to be drawn from inside the list box's own render(), not from the
--- panel's. PZ renders parents before children, so anything painted in
--- ISCraftLogicPanel:render() gets covered by the list's black background --
--- which is exactly why the earlier version produced nothing visible even
--- though the geometry was correct.
+-- Drawn from ISCraftLogicPanel:render() like the X / Y / L3 glyphs, which are
+-- known to show up. The coordinates are clamped into the panel rect so a bad
+-- absolute position can never push the hint off-screen.
 local function countContainedItems(list)
     if type(list) ~= "table" or type(list.items) ~= "table" then return 0 end
     local count = 0
@@ -781,15 +772,20 @@ local function countContainedItems(list)
     return count
 end
 
-local lastContainedCount = -1
+local lastHintState = nil
 
-local function drawContainedHintInList(list)
+local function drawContainedHint(self)
+    local panel = safeIndex(self, "resourceInventoryPanel")
+    local list = safeIndex(panel, "itemListBox")
     local containedCount = countContainedItems(list)
-    if containedCount ~= lastContainedCount then
-        lastContainedCount = containedCount
-        log("R3 hint: contained item count is now " .. tostring(containedCount))
+    if containedCount == 0 then
+        if lastHintState ~= "empty" then
+            lastHintState = "empty"
+            log("R3 hint: hidden (no contained items)")
+        end
+        return
     end
-    if containedCount == 0 then return end
+    if type(list) ~= "table" or type(list.getAbsoluteX) ~= "function" then return end
 
     local font = rawget(_G, "UIFont") and (UIFont.Small or UIFont.Medium) or nil
     if not font or type(getTextManager) ~= "function" then return end
@@ -798,47 +794,55 @@ local function drawContainedHintInList(list)
     local label = text("UI_GQOS_CraftLogicTakeBack", "取回")
     local textWidth = manager:MeasureStringX(font, label)
 
+    local originX, originY = 0, 0
+    if type(self.getAbsoluteX) == "function" then
+        local okOX, ox = pcall(self.getAbsoluteX, self)
+        local okOY, oy = pcall(self.getAbsoluteY, self)
+        if okOX and type(ox) == "number" then originX = ox end
+        if okOY and type(oy) == "number" then originY = oy end
+    end
+
+    local okX, lx = pcall(list.getAbsoluteX, list)
+    local okY, ly = pcall(list.getAbsoluteY, list)
+    if not okX or not okY or type(lx) ~= "number" or type(ly) ~= "number" then return end
     local listWidth = tonumber(safeIndex(list, "width")) or 200
     local listHeight = tonumber(safeIndex(list, "height")) or 80
+    local panelWidth = tonumber(safeIndex(self, "width")) or 1000
+    local panelHeight = tonumber(safeIndex(self, "height")) or 600
+
     local padding = 8
     local gap = 5
     local rowHeight = math.max(PROMPT_ICON_SIZE, lineHeight)
     local glyphWidth = glyphSize(getJoypadTexture({ "RStick", "AnalogueR", "R3" }), PROMPT_ICON_SIZE)
 
-    -- Bottom-left corner of the list box.
-    local leftX = padding
-    local rowTop = listHeight - rowHeight - padding
+    -- Bottom-left corner of the list box, expressed in this panel's space.
+    local leftX = (lx - originX) + padding
+    local rowTop = (ly - originY) + listHeight - rowHeight - padding
 
-    -- If the list is too narrow for icon + label, drop the label instead of
-    -- letting the text spill outside the column.
-    local showLabel = (glyphWidth + gap + textWidth) <= (listWidth - padding * 2)
+    -- Clamp inside the panel: the absolute coordinates of the nested table
+    -- layout are not always what the eye expects, and an off-panel draw is
+    -- silently clipped.
+    local maxLeftX = panelWidth - glyphWidth - padding
+    if leftX > maxLeftX then leftX = maxLeftX end
+    if leftX < padding then leftX = padding end
+    local maxRowTop = panelHeight - rowHeight - padding
+    if rowTop > maxRowTop then rowTop = maxRowTop end
+    if rowTop < 0 then rowTop = 0 end
 
-    log(string.format("R3 hint: count=%d list=%.0fx%.0f leftX=%.0f rowTop=%.0f showLabel=%s",
-        containedCount, listWidth, listHeight, leftX, rowTop, tostring(showLabel)))
+    local showLabel = (glyphWidth + gap + textWidth) <= (panelWidth - leftX - padding)
+    local state = string.format("count=%d list=%.0fx%.0f at(%.0f,%.0f) origin=(%.0f,%.0f) leftX=%.0f rowTop=%.0f label=%s",
+        containedCount, listWidth, listHeight, lx, ly, originX, originY, leftX, rowTop, tostring(showLabel))
+    if state ~= lastHintState then
+        lastHintState = state
+        log("R3 hint: " .. state)
+    end
 
-    drawKeyGlyph(list, { "RStick", "AnalogueR", "R3" }, "R3",
+    drawKeyGlyph(self, { "RStick", "AnalogueR", "R3" }, "R3",
         leftX + glyphWidth / 2, rowTop + rowHeight / 2, font)
     if showLabel then
-        pcall(list.drawText, list, label, leftX + glyphWidth + gap,
+        pcall(self.drawText, self, label, leftX + glyphWidth + gap,
             rowTop + (rowHeight - lineHeight) / 2, 0.9, 0.9, 0.9, 1, font)
     end
-end
-
--- Hooked on the list itself so the hint is painted after its own background.
-installContainedHint = function(self)
-    local panel = safeIndex(self, "resourceInventoryPanel")
-    local list = safeIndex(panel, "itemListBox")
-    if type(list) ~= "table" or list._gqsR3HintInstalled then return end
-    local originalRender = list.render
-    if type(originalRender) ~= "function" then return end
-
-    list._gqsR3HintInstalled = true
-    list.render = function(listSelf, ...)
-        local result = { originalRender(listSelf, ...) }
-        pcall(drawContainedHintInList, listSelf)
-        return unpack(result)
-    end
-    log("R3 hint installed on the contained-items list")
 end
 
 local EntityWindow = rawget(_G, "ISEntityWindow")
@@ -862,6 +866,7 @@ CraftLogicPanel.render = function(self, ...)
         pcall(self.renderJoypadNavigateOverlay, self, getPlayerNum(self))
     end
     pcall(drawButtonPrompts, self)
+    pcall(drawContainedHint, self)
 end
 
 CraftLogicPanel._gqsCraftLogicJoypadInstalled = true
