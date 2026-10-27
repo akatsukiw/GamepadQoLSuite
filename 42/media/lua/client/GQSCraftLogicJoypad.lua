@@ -803,12 +803,13 @@ local function drawContainedHint(self)
     panelWidth = panelWidth or 1000
     panelHeight = panelHeight or 600
 
-    local padding = 8
+    local padding = 18
     local gap = 5
     local rowHeight = math.max(PROMPT_ICON_SIZE, lineHeight)
     local glyphWidth = glyphSize(getJoypadTexture({ "RStick", "AnalogueR", "R3" }), PROMPT_ICON_SIZE)
 
-    -- Bottom-right corner of the whole panel, right-aligned.
+    -- Bottom-right corner of the whole panel, right-aligned. 18px inset keeps it
+    -- off the border without floating in the middle.
     local leftX = panelWidth - padding - textWidth - gap - glyphWidth
     local rowTop = panelHeight - rowHeight - padding
 
