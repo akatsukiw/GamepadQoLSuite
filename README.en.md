@@ -12,7 +12,7 @@ Fills in the parts of B42's controller support that still feel awkward: multi-it
 |---|---|
 | Game version | Build 42.21.0 (B42 only, not compatible with B41) |
 | Required dependency | [CustomGamepadUI](https://steamcommunity.com/sharedfiles/filedetails/?id=3001154607) |
-| Build version | `1.5.2.0` |
+| Build version | `1.5.9.16` |
 | Author | Akatsuki_w |
 | Languages | English / Simplified Chinese |
 
@@ -47,6 +47,10 @@ B42's controller support works, but inventory and panel handling still assume a 
 | [Panel info](#7-panel-info-and-trait-details) | `X` / `Y` / `RT`+Up/Down | Recipe favorites and paging, trait details, skill XP hints |
 | [Fitness panel](#8-fitness-panel) | open from the right wheel | Auto-select exercise, default duration, one-press start |
 | [Misc](#11-miscellaneous) | — | Disable B smash-window, map R3 focus |
+| [Info-panel nutrition readout](#12-info-panel-nutrition-readout) | Info panel `Y` | Expand lipids / carbs / protein / calories, independent toggle |
+| [Hold-B to exit fishing](#13-hold-b-to-exit-fishing) | hold `B` while fishing | Closing a panel no longer mis-retracts the rod; shows a progress ring |
+| [Drying-rack and other workstation panels](#14-drying-rack-and-other-workstation-panels) | D-pad / `A` `X` `Y` `L3` `R3` | Full gamepad control of leather / plant drying racks |
+| [Recipe sort shortcut](#15-recipe-sort-shortcut) | `L3` | One-key cycle sort in build / craft / drying-rack panels |
 
 Every binding can be changed in **Options → Mod Options → Gamepad QoL Suite**.
 
@@ -62,7 +66,11 @@ Every binding can be changed in **Options → Mod Options → Gamepad QoL Suite*
 - Fixes a vanilla crash when pressing B to exit the building/crafting panel after opening the rightmost optional item list.
 - Fixes a CleanUI edge case in carried-container selection: LB+Up can now jump to the last item (requires container switching scheme 3 in the vanilla accessibility settings).
 - Fixes CleanUI's out-of-order gamepad switching after sorting carried containers. (Do not enable CleanUI's sortable loot container — it has the same bug, unfixed.)
+- Fixes a CleanUI crash in tutorial mode when it prompts "press Y to open container".
 - Fixes CGUI's Start-key double-press emulation crashing on the equipped-items row.
+- Split-screen: the 2nd and later local players now also get a melee target outline (vanilla only draws player 1).
+- Fixes RT+B accidentally closing HUD status indicators (e.g. Modern Status) and hover detail popups.
+- New: info-panel nutrition readout, hold-B fishing exit, and drying-rack workstation panel gamepad support — see sections 12–15 below.
 
 ---
 
@@ -225,6 +233,47 @@ Vanilla only lets pure water participate in auto-drinking. With this enabled, mi
 |---|---|
 | Disable B smash-window | Removes the vanilla B binding for smashing windows at runtime to prevent accidents. Does not rewrite InputBindings XML, so the Controller settings page may still show the original binding |
 | World map R3 focus | Press `R3` on the world map to recenter on your character |
+
+---
+
+### 12. Info-panel nutrition readout
+
+On the character info panel (Info page), press `Y` to expand a narrow panel showing current **lipids / carbs / protein / calories**.
+
+These values are only visible in the debug menu in vanilla, so this is exposed as a standalone toggle (Mod Options → Panel enhancements, on by default). It is mutually exclusive with the `X` trait detail panel; while expanded, the D-pad still operates the info panel normally, and `B` closes it.
+
+### 13. Hold-B to exit fishing
+
+In vanilla, a single tap of `B` while fishing retracts the rod — worse, pressing `B` to close a health or build panel also retracts the rod, and doing so while not idle wears down the fishing-line durability.
+
+Now:
+
+- While focus is on any panel, the fishing logic **entirely ignores** `B`;
+- With world focus, you must **hold for 500 ms** to exit;
+- While fishing, the bottom-right shows `[B] Hold to exit`; a progress ring fills around the B icon as you hold, and it exits when full.
+
+Keyboard is unaffected (vanilla keyboard uses movement / attack / cancel keys, not B). Can be disabled in Mod Options → Other features.
+
+### 14. Drying-rack and other workstation panels
+
+Workstations like the leather and plant drying racks use the `CraftLogic` panel, which vanilla **has zero gamepad support for** (open it and you can only press B to exit — everything else needs a mouse). Now every binding works:
+
+| Button | Action |
+|---|---|
+| D-pad | Scroll within the current list |
+| `RB` + D-pad | Switch region (recipe list / craft button / available items / contained items) |
+| `A` | Select recipe, insert materials, start crafting |
+| `X` | Smart key: if the craft button is lit, craft directly; otherwise auto-insert the next available material |
+| `Y` | Take all |
+| `L3` | Cycle recipe sort mode |
+| `R3` | Retrieve items from "contained items" (prompt greys out when empty) |
+| `B` | Close |
+
+The top-right of the title bar shows the full button hints; an icon hint also sits to the left of the craft button and to the right of "Take all".
+
+### 15. Recipe sort shortcut
+
+In the build, craft, and drying-rack panels you can press `L3` to cycle the sort mode among "recipe name / most recent / most used" — typing to search recipes on a gamepad is impractical, so sorting is the one that's actually useful.
 
 ---
 
