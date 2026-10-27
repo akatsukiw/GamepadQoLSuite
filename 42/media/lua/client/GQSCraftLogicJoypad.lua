@@ -803,8 +803,18 @@ local function drawContainedHint(self)
     if not okX or not okY or type(lx) ~= "number" or type(ly) ~= "number" then return end
     local listWidth = tonumber(safeIndex(list, "width")) or 200
     local listHeight = tonumber(safeIndex(list, "height")) or 80
-    local panelWidth = tonumber(safeIndex(self, "width")) or 1000
-    local panelHeight = tonumber(safeIndex(self, "height")) or 600
+    local panelWidth = tonumber(safeIndex(self, "width"))
+    local panelHeight = tonumber(safeIndex(self, "height"))
+    if not panelWidth or panelWidth <= 0 then
+        local okW, w = pcall(function() return self:getWidth() end)
+        if okW then panelWidth = tonumber(w) end
+    end
+    if not panelHeight or panelHeight <= 0 then
+        local okH, h = pcall(function() return self:getHeight() end)
+        if okH then panelHeight = tonumber(h) end
+    end
+    panelWidth = panelWidth or 1000
+    panelHeight = panelHeight or 600
 
     local padding = 8
     local gap = 5
@@ -826,18 +836,20 @@ local function drawContainedHint(self)
     if rowTop < 0 then rowTop = 0 end
 
     local showLabel = (glyphWidth + gap + textWidth) <= (panelWidth - leftX - padding)
-    local state = string.format("count=%d enabled=%s list=%.0fx%.0f at(%.0f,%.0f) origin=(%.0f,%.0f) leftX=%.0f rowTop=%.0f label=%s",
-        containedCount, tostring(enabled), listWidth, listHeight, lx, ly, originX, originY,
-        leftX, rowTop, tostring(showLabel))
+    local state = string.format("count=%d enabled=%s panel=%.0fx%.0f list=%.0fx%.0f at(%.0f,%.0f) origin=(%.0f,%.0f) leftX=%.0f rowTop=%.0f label=%s",
+        containedCount, tostring(enabled), panelWidth, panelHeight, listWidth, listHeight,
+        lx, ly, originX, originY, leftX, rowTop, tostring(showLabel))
     if state ~= lastHintState then
         lastHintState = state
         log("R3 hint: " .. state)
     end
 
-    -- Child columns leave a stencil rect behind; anything painted outside it
-    -- is silently clipped. That is why this hint only appeared while RB was
-    -- held (renderJoypadNavigateOverlay calls repaintStencilRect first).
-    pcall(function() self:clearStencilRect() end)
+    -- A parent stencil clips the bottom-right corner. clearStencilRect() only
+    -- clears this element's own rect, so it does nothing here -- what actually
+    -- un-clips the area is repaintStencilRect(), the same call
+    -- renderJoypadNavigateOverlay() makes (which is why holding RB made the
+    -- hint appear).
+    pcall(function() self:repaintStencilRect(0, 0, panelWidth, panelHeight) end)
 
     local textR, textG, textB = 0.90, 0.90, 0.90
     if not enabled then
