@@ -777,15 +777,11 @@ local lastHintState = nil
 local function drawContainedHint(self)
     local panel = safeIndex(self, "resourceInventoryPanel")
     local list = safeIndex(panel, "itemListBox")
-    local containedCount = countContainedItems(list)
-    if containedCount == 0 then
-        if lastHintState ~= "empty" then
-            lastHintState = "empty"
-            log("R3 hint: hidden (no contained items)")
-        end
-        return
-    end
     if type(list) ~= "table" or type(list.getAbsoluteX) ~= "function" then return end
+    local containedCount = countContainedItems(list)
+    -- Shown either way: grey when there is nothing to take back, so the key is
+    -- still discoverable instead of appearing and disappearing.
+    local enabled = containedCount > 0
 
     local font = rawget(_G, "UIFont") and (UIFont.Small or UIFont.Medium) or nil
     if not font or type(getTextManager) ~= "function" then return end
@@ -830,18 +826,29 @@ local function drawContainedHint(self)
     if rowTop < 0 then rowTop = 0 end
 
     local showLabel = (glyphWidth + gap + textWidth) <= (panelWidth - leftX - padding)
-    local state = string.format("count=%d list=%.0fx%.0f at(%.0f,%.0f) origin=(%.0f,%.0f) leftX=%.0f rowTop=%.0f label=%s",
-        containedCount, listWidth, listHeight, lx, ly, originX, originY, leftX, rowTop, tostring(showLabel))
+    local state = string.format("count=%d enabled=%s list=%.0fx%.0f at(%.0f,%.0f) origin=(%.0f,%.0f) leftX=%.0f rowTop=%.0f label=%s",
+        containedCount, tostring(enabled), listWidth, listHeight, lx, ly, originX, originY,
+        leftX, rowTop, tostring(showLabel))
     if state ~= lastHintState then
         lastHintState = state
         log("R3 hint: " .. state)
+    end
+
+    -- Child columns leave a stencil rect behind; anything painted outside it
+    -- is silently clipped. That is why this hint only appeared while RB was
+    -- held (renderJoypadNavigateOverlay calls repaintStencilRect first).
+    pcall(function() self:clearStencilRect() end)
+
+    local textR, textG, textB = 0.90, 0.90, 0.90
+    if not enabled then
+        textR, textG, textB = 0.45, 0.45, 0.45
     end
 
     drawKeyGlyph(self, { "RStick", "AnalogueR", "R3" }, "R3",
         leftX + glyphWidth / 2, rowTop + rowHeight / 2, font)
     if showLabel then
         pcall(self.drawText, self, label, leftX + glyphWidth + gap,
-            rowTop + (rowHeight - lineHeight) / 2, 0.9, 0.9, 0.9, 1, font)
+            rowTop + (rowHeight - lineHeight) / 2, textR, textG, textB, 1, font)
     end
 end
 
