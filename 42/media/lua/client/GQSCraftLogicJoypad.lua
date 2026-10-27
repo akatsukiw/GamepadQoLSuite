@@ -6,27 +6,12 @@
 -- 但停在面板本身，子控件一个都拿不到，所以打开后只能按 B 退出。
 --
 -- 同目录的 ISCraftBenchPanel（软化梁 / 单宁桶）有完整的四件套，这里照它的结构补齐。
---
 -- 面板的真实视觉布局是 3 列 2 行：
 --   ┌──────────┬──────────────┬────────────┐
---   │ 配方列表 │ 输入/制作/输出│ 可用物品   │
+--   │ 配方列表  │ 输入/制作/输出│ 可用物品    │
 --   │          ├──────────────┼────────────┤
---   │          │ 进行中/完成  │ 已包含物品 │
+--   │          │ 进行中/完成   │ 已包含物品  │
 --   └──────────┴──────────────┴────────────┘
--- 所以导航图按这个网格来（RB + 方向键切换区域，普通方向键在区域内滚动）：
---
---   配方列表 ←→ 制作按钮 ←→ 可用物品
---      ↕                        ↕
---   全部拿走 ←→ 已包含物品
---
--- 原版就支持的控件（不需要动）：
---   ISRecipeScrollingListBox  配方列表    自带 A 选中 / B 回父级
---   ISScrollingListBox        可用物品 / 已包含物品   自带 A 确认 + 上下滚动
---   ISWidgetCraftLogicControl 制作按钮    ISPanelJoypad 派生，自带焦点
---   ISUIElement:renderJoypadNavigateOverlay  导航箭头覆盖层，任何元素都能调
--- 真正缺的只有两件事，用 X / Y 补上：
---   1. 输入槽位上的小箭头（打开右侧"可用物品"）只有鼠标点击
---   2. "全部拿走"按钮没有手柄焦点
 
 -- TEMPORARY: set GQSDebugLog.lua craftLogic back to false once the material
 -- auto-add path is confirmed working in game.
@@ -555,7 +540,8 @@ end
 -- ---------------------------------------------------------------------------
 -- On-screen key hints
 -- ---------------------------------------------------------------------------
-local PROMPT_ICON_SIZE = 18
+local PROMPT_ICON_SIZE = 20
+local HEADER_ICON_SIZE = 18
 
 local function getJoypadTexture(names)
     local joypad = rawget(_G, "Joypad")
@@ -567,26 +553,60 @@ local function getJoypadTexture(names)
     return nil
 end
 
+-- Joypad glyphs are not square: the RB / L3 / R3 art is wide and flat. Stretching
+-- it into a square shrinks it to a barely readable strip, so scale by height and
+-- let the width follow the texture's own aspect ratio.
+local function glyphSize(texture, height)
+    if not texture then return height, height end
+    local okW, w = pcall(function() return texture:getWidth() end)
+    local okH, h = pcall(function() return texture:getHeight() end)
+    if not okW or not okH or type(w) ~= "number" or type(h) ~= "number" or w <= 0 or h <= 0 then
+        return height, height
+    end
+    local width = w * (height / h)
+    -- Guard against absurdly wide art eating the whole row.
+    local maxWidth = height * 2.6
+    if width > maxWidth then
+        return maxWidth, height * (maxWidth / width)
+    end
+    return width, height
+end
+
 local function text(key, fallback)
     local value = type(getText) == "function" and getText(key) or nil
     if type(value) ~= "string" or value == "" or value == key then return fallback end
     return value
 end
 
--- Draws one key glyph centred on (centerX, centerY).
-local function drawKeyGlyph(element, textureNames, fallbackLetter, centerX, centerY, font)
+-- Right-aligned variant: the glyph's right edge lands on rightEdgeX.
+local function drawKeyGlyphRight(element, textureNames, fallbackLetter, rightEdgeX, centerY, font, size)
+    size = tonumber(size) or PROMPT_ICON_SIZE
     local texture = getJoypadTexture(textureNames)
-    local x = centerX - PROMPT_ICON_SIZE / 2
-    local y = centerY - PROMPT_ICON_SIZE / 2
+    local width, height = glyphSize(texture, size)
+    local x = rightEdgeX - width
+    local y = centerY - height / 2
     if texture then
-        pcall(element.drawTextureScaled, element, texture, x, y,
-            PROMPT_ICON_SIZE, PROMPT_ICON_SIZE, 1, 1, 1, 1)
+        pcall(element.drawTextureScaled, element, texture, x, y, width, height, 1, 1, 1, 1)
     elseif fallbackLetter then
-        local ok = pcall(element.drawText, element, fallbackLetter, x + 4, y + 2, 1, 1, 1, 1, font)
-        if not ok then
-            pcall(element.drawText, element, fallbackLetter, x + 4, y + 2, 1, 1, 1, 1)
-        end
+        pcall(element.drawText, element, fallbackLetter, x, y, 1, 1, 1, 1, font)
     end
+    return width, height
+end
+
+-- Draws one key glyph centred on (centerX, centerY). Returns its width so
+-- callers can lay out text next to it.
+local function drawKeyGlyph(element, textureNames, fallbackLetter, centerX, centerY, font, size)
+    size = tonumber(size) or PROMPT_ICON_SIZE
+    local texture = getJoypadTexture(textureNames)
+    local width, height = glyphSize(texture, size)
+    local x = centerX - width / 2
+    local y = centerY - height / 2
+    if texture then
+        pcall(element.drawTextureScaled, element, texture, x, y, width, height, 1, 1, 1, 1)
+    elseif fallbackLetter then
+        pcall(element.drawText, element, fallbackLetter, x, y, 1, 1, 1, 1, font)
+    end
+    return width, height
 end
 
 -- X next to the craft button, Y next to "take all". Both use absolute
@@ -615,16 +635,23 @@ local function drawButtonPrompts(self)
         end
     end
 
-    -- L3 sits in the empty space just left of the sort combo box.
+    -- L3 goes in the blank space left of the "Sort by" caption. Anchoring to the
+    -- combo box would land on top of that caption, since the combo sits to its
+    -- right.
     local filterPanel = safeIndex(safeIndex(self, "recipesPanel"), "recipeFilterPanel")
     local sortCombo = safeIndex(filterPanel, "sortCombo")
-    if type(sortCombo) == "table" and type(sortCombo.getAbsoluteX) == "function" then
-        local okX, sx = pcall(sortCombo.getAbsoluteX, sortCombo)
-        local okY, sy = pcall(sortCombo.getAbsoluteY, sortCombo)
-        local sh = tonumber(safeIndex(sortCombo, "height")) or 20
-        if okX and okY and type(sx) == "number" and type(sy) == "number" then
-            drawKeyGlyph(self, { "LStick", "AnalogueL", "L3" }, "L3",
-                sx - originX - 14, sy - originY + sh / 2, font)
+    local sortLabel = safeIndex(filterPanel, "sortComboLabel")
+    local anchor = sortCombo
+    if type(sortLabel) == "table" and type(sortLabel.getAbsoluteX) == "function" then
+        anchor = sortLabel
+    end
+    if type(anchor) == "table" and type(anchor.getAbsoluteX) == "function" then
+        local okX, ax = pcall(anchor.getAbsoluteX, anchor)
+        local okY, ay = pcall(anchor.getAbsoluteY, anchor)
+        local ah = tonumber(safeIndex(anchor, "height")) or 20
+        if okX and okY and type(ax) == "number" and type(ay) == "number" then
+            drawKeyGlyphRight(self, { "LStick", "AnalogueL", "L3" }, "L3",
+                ax - originX - 6, ay - originY + ah / 2, font)
         end
     end
 
@@ -667,9 +694,9 @@ local function drawHeaderHints(window)
     if not font or type(getTextManager) ~= "function" then return end
     local manager = getTextManager()
     local lineHeight = manager:getFontHeight(font)
-    local iconSize = 16
-    local iconGap = 4
-    local blockGap = 14
+    local iconSize = HEADER_ICON_SIZE
+    local iconGap = 5
+    local blockGap = 16
 
     local xLabel = isCraftReady(panel)
         and text("IGUI_CraftingWindow_Craft", "制作")
@@ -690,7 +717,9 @@ local function drawHeaderHints(window)
     -- Measure first, then right-align inside the header.
     local totalWidth = 0
     for index, part in ipairs(parts) do
-        part.width = iconSize + iconGap + manager:MeasureStringX(font, part.label)
+        local glyphW = glyphSize(getJoypadTexture(part.icon), iconSize)
+        part.glyphWidth = glyphW
+        part.width = glyphW + iconGap + manager:MeasureStringX(font, part.label)
         totalWidth = totalWidth + part.width
         if index < #parts then totalWidth = totalWidth + blockGap end
     end
@@ -714,11 +743,72 @@ local function drawHeaderHints(window)
 
     for _, part in ipairs(parts) do
         drawKeyGlyph(window, part.icon, part.letter,
-            cursorX + iconSize / 2, baselineY + lineHeight / 2, font)
-        cursorX = cursorX + iconSize + iconGap
+            cursorX + part.glyphWidth / 2, baselineY + lineHeight / 2, font, iconSize)
+        cursorX = cursorX + part.glyphWidth + iconGap
         pcall(window.drawText, window, part.label, cursorX, baselineY, 0.9, 0.9, 0.9, 1, font)
         cursorX = cursorX + manager:MeasureStringX(font, part.label) + blockGap
     end
+end
+
+-- "Contained items" column: when something can be taken back, show an R3 hint
+-- in that column's own bottom-right corner. This keeps the shortcut visible at
+-- the place the player is looking instead of only in the title bar.
+local function countContainedItems(list)
+    if type(list) ~= "table" or type(list.items) ~= "table" then return 0 end
+    local count = 0
+    for _, entry in ipairs(list.items) do
+        local data = entry and entry.item
+        if type(data) == "table"
+            and data.inventoryItem ~= nil
+            and not data.isHeader
+            and not data.isNode
+            and not data.isUnavailable then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function drawContainedTakeBackHint(self)
+    local panel = safeIndex(self, "resourceInventoryPanel")
+    local list = safeIndex(panel, "itemListBox")
+    if countContainedItems(list) == 0 then return end
+    if type(panel.getAbsoluteX) ~= "function" then return end
+
+    local font = rawget(_G, "UIFont") and (UIFont.Small or UIFont.Medium) or nil
+    if not font or type(getTextManager) ~= "function" then return end
+    local manager = getTextManager()
+    local lineHeight = manager:getFontHeight(font)
+    local label = text("UI_GQOS_CraftLogicTakeBack", "取回")
+    local textWidth = manager:MeasureStringX(font, label)
+
+    local originX, originY = 0, 0
+    if type(self.getAbsoluteX) == "function" then
+        local okOX, ox = pcall(self.getAbsoluteX, self)
+        local okOY, oy = pcall(self.getAbsoluteY, self)
+        if okOX and type(ox) == "number" then originX = ox end
+        if okOY and type(oy) == "number" then originY = oy end
+    end
+
+    local okX, px = pcall(panel.getAbsoluteX, panel)
+    local okY, py = pcall(panel.getAbsoluteY, panel)
+    if not okX or not okY or type(px) ~= "number" or type(py) ~= "number" then return end
+    local panelWidth = tonumber(safeIndex(panel, "width")) or 200
+    local panelHeight = tonumber(safeIndex(panel, "height")) or 80
+
+    local padding = 6
+    local gap = 4
+    local rowHeight = math.max(PROMPT_ICON_SIZE, lineHeight)
+    local rightEdge = (px - originX) + panelWidth - padding
+    local rowTop = (py - originY) + panelHeight - rowHeight - padding
+
+    local glyphWidth = glyphSize(getJoypadTexture({ "RStick", "AnalogueR", "R3" }), PROMPT_ICON_SIZE)
+    local leftX = rightEdge - textWidth - gap - glyphWidth
+
+    drawKeyGlyph(self, { "RStick", "AnalogueR", "R3" }, "R3",
+        leftX + glyphWidth / 2, rowTop + rowHeight / 2, font)
+    pcall(self.drawTextRight, self, label, rightEdge, rowTop + (rowHeight - lineHeight) / 2,
+        0.9, 0.9, 0.9, 1, font)
 end
 
 local EntityWindow = rawget(_G, "ISEntityWindow")
@@ -742,6 +832,7 @@ CraftLogicPanel.render = function(self, ...)
         pcall(self.renderJoypadNavigateOverlay, self, getPlayerNum(self))
     end
     pcall(drawButtonPrompts, self)
+    pcall(drawContainedTakeBackHint, self)
 end
 
 CraftLogicPanel._gqsCraftLogicJoypadInstalled = true
