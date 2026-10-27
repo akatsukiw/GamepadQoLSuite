@@ -540,8 +540,8 @@ end
 -- ---------------------------------------------------------------------------
 -- On-screen key hints
 -- ---------------------------------------------------------------------------
-local PROMPT_ICON_SIZE = 20
-local HEADER_ICON_SIZE = 18
+local PROMPT_ICON_SIZE = 28
+local HEADER_ICON_SIZE = 24
 
 local function getJoypadTexture(names)
     local joypad = rawget(_G, "Joypad")
@@ -769,11 +769,18 @@ local function countContainedItems(list)
     return count
 end
 
+local lastContainedCount = -1
+local lastContainedGeometry = nil
+
 local function drawContainedTakeBackHint(self)
     local panel = safeIndex(self, "resourceInventoryPanel")
     local list = safeIndex(panel, "itemListBox")
-    if countContainedItems(list) == 0 then return end
-    if type(panel.getAbsoluteX) ~= "function" then return end
+    local containedCount = countContainedItems(list)
+    if containedCount == 0 then return end
+    if type(panel.getAbsoluteX) ~= "function" then
+        log("R3 hint: resourceInventoryPanel has no getAbsoluteX", true)
+        return
+    end
 
     local font = rawget(_G, "UIFont") and (UIFont.Small or UIFont.Medium) or nil
     if not font or type(getTextManager) ~= "function" then return end
@@ -796,8 +803,8 @@ local function drawContainedTakeBackHint(self)
     local panelWidth = tonumber(safeIndex(panel, "width")) or 200
     local panelHeight = tonumber(safeIndex(panel, "height")) or 80
 
-    local padding = 6
-    local gap = 4
+    local padding = 8
+    local gap = 5
     local rowHeight = math.max(PROMPT_ICON_SIZE, lineHeight)
     local rightEdge = (px - originX) + panelWidth - padding
     local rowTop = (py - originY) + panelHeight - rowHeight - padding
@@ -805,10 +812,28 @@ local function drawContainedTakeBackHint(self)
     local glyphWidth = glyphSize(getJoypadTexture({ "RStick", "AnalogueR", "R3" }), PROMPT_ICON_SIZE)
     local leftX = rightEdge - textWidth - gap - glyphWidth
 
+    if leftX < 0 then
+        -- The column is narrower than the hint; drop the text and keep the glyph
+        -- rather than drawing half of it outside the panel.
+        leftX = rightEdge - glyphWidth
+        label = ""
+        textWidth = 0
+    end
+
+    local geometry = string.format("%.0fx%.0f at (%.0f,%.0f) origin=(%.0f,%.0f) rowTop=%.0f leftX=%.0f rightEdge=%.0f",
+        panelWidth, panelHeight, px, py, originX, originY, rowTop, leftX, rightEdge)
+    if geometry ~= lastContainedGeometry or containedCount ~= lastContainedCount then
+        lastContainedGeometry = geometry
+        lastContainedCount = containedCount
+        log("R3 hint: count=" .. tostring(containedCount) .. " " .. geometry)
+    end
+
     drawKeyGlyph(self, { "RStick", "AnalogueR", "R3" }, "R3",
         leftX + glyphWidth / 2, rowTop + rowHeight / 2, font)
-    pcall(self.drawTextRight, self, label, rightEdge, rowTop + (rowHeight - lineHeight) / 2,
-        0.9, 0.9, 0.9, 1, font)
+    if textWidth > 0 then
+        pcall(self.drawTextRight, self, label, rightEdge, rowTop + (rowHeight - lineHeight) / 2,
+            0.9, 0.9, 0.9, 1, font)
+    end
 end
 
 local EntityWindow = rawget(_G, "ISEntityWindow")
