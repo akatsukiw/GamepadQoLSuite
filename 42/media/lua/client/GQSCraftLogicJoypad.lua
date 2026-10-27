@@ -790,19 +790,6 @@ local function drawContainedHint(self)
     local label = text("UI_GQOS_CraftLogicTakeBack", "取回")
     local textWidth = manager:MeasureStringX(font, label)
 
-    local originX, originY = 0, 0
-    if type(self.getAbsoluteX) == "function" then
-        local okOX, ox = pcall(self.getAbsoluteX, self)
-        local okOY, oy = pcall(self.getAbsoluteY, self)
-        if okOX and type(ox) == "number" then originX = ox end
-        if okOY and type(oy) == "number" then originY = oy end
-    end
-
-    local okX, lx = pcall(list.getAbsoluteX, list)
-    local okY, ly = pcall(list.getAbsoluteY, list)
-    if not okX or not okY or type(lx) ~= "number" or type(ly) ~= "number" then return end
-    local listWidth = tonumber(safeIndex(list, "width")) or 200
-    local listHeight = tonumber(safeIndex(list, "height")) or 80
     local panelWidth = tonumber(safeIndex(self, "width"))
     local panelHeight = tonumber(safeIndex(self, "height"))
     if not panelWidth or panelWidth <= 0 then
@@ -821,24 +808,16 @@ local function drawContainedHint(self)
     local rowHeight = math.max(PROMPT_ICON_SIZE, lineHeight)
     local glyphWidth = glyphSize(getJoypadTexture({ "RStick", "AnalogueR", "R3" }), PROMPT_ICON_SIZE)
 
-    -- Bottom-left corner of the list box, expressed in this panel's space.
-    local leftX = (lx - originX) + padding
-    local rowTop = (ly - originY) + listHeight - rowHeight - padding
+    -- Bottom-right corner of the whole panel, right-aligned.
+    local leftX = panelWidth - padding - textWidth - gap - glyphWidth
+    local rowTop = panelHeight - rowHeight - padding
 
-    -- Clamp inside the panel: the absolute coordinates of the nested table
-    -- layout are not always what the eye expects, and an off-panel draw is
-    -- silently clipped.
-    local maxLeftX = panelWidth - glyphWidth - padding
-    if leftX > maxLeftX then leftX = maxLeftX end
     if leftX < padding then leftX = padding end
-    local maxRowTop = panelHeight - rowHeight - padding
-    if rowTop > maxRowTop then rowTop = maxRowTop end
     if rowTop < 0 then rowTop = 0 end
 
-    local showLabel = (glyphWidth + gap + textWidth) <= (panelWidth - leftX - padding)
-    local state = string.format("count=%d enabled=%s panel=%.0fx%.0f list=%.0fx%.0f at(%.0f,%.0f) origin=(%.0f,%.0f) leftX=%.0f rowTop=%.0f label=%s",
-        containedCount, tostring(enabled), panelWidth, panelHeight, listWidth, listHeight,
-        lx, ly, originX, originY, leftX, rowTop, tostring(showLabel))
+    local showLabel = (glyphWidth + gap + textWidth) <= (panelWidth - padding * 2)
+    local state = string.format("count=%d enabled=%s panel=%.0fx%.0f leftX=%.0f rowTop=%.0f label=%s",
+        containedCount, tostring(enabled), panelWidth, panelHeight, leftX, rowTop, tostring(showLabel))
     if state ~= lastHintState then
         lastHintState = state
         log("R3 hint: " .. state)
