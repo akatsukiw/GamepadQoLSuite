@@ -179,6 +179,7 @@ if options then
     GQS.fishingHoldToStopEnabled = options:addTickBox("fishingHoldToStopEnabled", "UI_GQOS_FishingHoldToStopEnabled", true, "UI_GQOS_FishingHoldToStopEnabled_tooltip")
     GQS.selectWheelPvpOptionEnabled = options:addTickBox("selectWheelPvpOptionEnabled", "UI_GQOS_SelectWheelPvpOptionEnabled", false, "UI_GQOS_SelectWheelPvpOptionEnabled_tooltip")
     GQS.disableSmashWindowBEnabled = options:addTickBox("disableSmashWindowBEnabled", "UI_GQOS_DisableSmashWindowBEnabled", false, "UI_GQOS_DisableSmashWindowBEnabled_tooltip")
+    GQS.evolvedNameFixEnabled = options:addTickBox("evolvedNameFixEnabled", "UI_GQOS_EvolvedNameFixEnabled", true, "UI_GQOS_EvolvedNameFixEnabled_tooltip")
 end
 
 -- Keep dependent modules that access the historical shared table name working.

@@ -1,7 +1,8 @@
 name=Gamepad QoL Suite
 id=GamepadQoLSuite
 author=Akatsuki_w
+poster=poster.png
 description=手柄操作、物品栏、多选、容器转移与界面便利功能整合套件。进游戏模组设置有更多选项。
 
-modversion=1.5.9.16
+modversion=1.5.10
 require=CustomGamepadUI

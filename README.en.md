@@ -12,7 +12,7 @@ Fills in the parts of B42's controller support that still feel awkward: multi-it
 |---|---|
 | Game version | Build 42.21.0 (B42 only, not compatible with B41) |
 | Required dependency | [CustomGamepadUI](https://steamcommunity.com/sharedfiles/filedetails/?id=3001154607) |
-| Build version | `1.5.9.16` |
+| Build version | `1.5.10` |
 | Author | Akatsuki_w |
 | Languages | English / Simplified Chinese |
 
@@ -51,6 +51,7 @@ B42's controller support works, but inventory and panel handling still assume a 
 | [Hold-B to exit fishing](#13-hold-b-to-exit-fishing) | hold `B` while fishing | Closing a panel no longer mis-retracts the rod; shows a progress ring |
 | [Drying-rack and other workstation panels](#14-drying-rack-and-other-workstation-panels) | D-pad / `A` `X` `Y` `L3` `R3` | Full gamepad control of leather / plant drying racks |
 | [Recipe sort shortcut](#15-recipe-sort-shortcut) | `L3` | One-key cycle sort in build / craft / drying-rack panels |
+| [Dish-name fix](#16-dish-names-in-non-english-languages) | — | No more `Base.Ramen` in cooked dish names under Chinese and other non-English languages |
 
 Every binding can be changed in **Options → Mod Options → Gamepad QoL Suite**.
 
@@ -70,7 +71,7 @@ Every binding can be changed in **Options → Mod Options → Gamepad QoL Suite*
 - Fixes CGUI's Start-key double-press emulation crashing on the equipped-items row.
 - Split-screen: the 2nd and later local players now also get a melee target outline (vanilla only draws player 1).
 - Fixes RT+B accidentally closing HUD status indicators (e.g. Modern Status) and hover detail popups.
-- New: info-panel nutrition readout, hold-B fishing exit, and drying-rack workstation panel gamepad support — see sections 12–15 below.
+- New: info-panel nutrition readout, hold-B fishing exit, drying-rack workstation panel gamepad support, and the non-English dish-name fix — see sections 12–16 below.
 
 ---
 
@@ -275,11 +276,25 @@ The top-right of the title bar shows the full button hints; an icon hint also si
 
 In the build, craft, and drying-rack panels you can press `L3` to cycle the sort mode among "recipe name / most recent / most used" — typing to search recipes on a gamepad is impractical, so sorting is the one that's actually useful.
 
+### 16. Dish names in non-English languages
+
+In Chinese (and other non-English languages) any recipe that uses an ingredient with an `EvolvedRecipeName` ends up with the internal ID in the dish name — e.g. "Cabbage and Base.Ramen Stir Fry".
+
+The cause is in vanilla: `Item.DoParam` resolves `EvolvedRecipeName` **immediately**, while the item is still unregistered in `ScriptManager`. The lookup fails, falls back to the internal ID, and that value is then **cached permanently in a static map**. Worse, the first line of `Translator.setDefaultItemEvolvedRecipeName` is `if (getLanguage() != getDefaultLanguage()) return;` — non-English languages never write a clean value, so the cache stays dirty forever. That is also why English players have never reported this.
+
+This mod overrides the Lua global `getItemEvolvedRecipeName` from `shared/` and turns "the returned value equals the internal ID" into `nil`, so the dish name falls back to the item's localized name.
+
+- Only affects dishes cooked **after** the change; existing dish names are not rewritten;
+- In multiplayer the name is generated on the server, so **the server must load this mod too**;
+- Mod Options → Miscellaneous → "Fix Base.XXX in dish names", on by default. **Keep it enabled in Chinese.**
+
 ---
 
 ## Mod Options panel
 
 **Options → Mod Options → Gamepad QoL Suite** contains: Inventory and Loot, Container operations, Key feature extensions, RB chords, RT+B focus reset, D-pad radial extensions, Panel enhancements, Select key sorting, and Miscellaneous.
+
+"Panel enhancements" is the master switch for all four panel features — info panel, skills panel, build / craft panels and the drying-rack panel. Turn it off and they immediately fall back to vanilla behaviour (the drying-rack panel then only responds to `B`).
 
 CustomGamepadUI's own "Inventory and Loot" entries and sort setting are taken over and hidden by this mod — **changing those in the upstream panel has no effect**, use this mod's panel instead. A few threshold options (double-press window, B hold threshold) are not rendered but their values are still saved; edit `Zomboid/ModOptions.ini` if you need to change them.
 

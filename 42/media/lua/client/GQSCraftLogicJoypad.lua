@@ -23,6 +23,20 @@ local function log(message, isError)
     if type(fn) == "function" then fn(LOG_CATEGORY, message) end
 end
 
+-- 「面板信息增强」总开关也管这个面板。关掉时本模块完全退让：不抢 X、不改导航、
+-- 不画提示，行为回到原版（打开面板只能按 B 退出）。每次调用都重新读开关，
+-- 所以在 Mod Options 里改了立刻生效，不需要重启或重开面板。
+local function isEnabled()
+    local options = rawget(_G, "GamepadQoLSuiteOptions")
+    local option = options and options.panelInfoEnhancementEnabled
+    if option and type(option.getValue) == "function" then
+        local ok, value = pcall(option.getValue, option)
+        if ok then return value == true end
+    end
+    -- 读不到开关就当开启，和 GQSPanelInfoEnhancement 保持一致。
+    return true
+end
+
 
 pcall(require, "Entity/ISUI/Components/Crafting/ISCraftLogicPanel")
 
@@ -429,6 +443,11 @@ local function wrapRecipeList(self)
     list._gqsCraftLogicList = true
     list._gqsCraftLogicPanel = self
     list.onJoypadDown = function(listSelf, button, joypadData, ...)
+        -- 这个包装装上就拆不掉，所以开关必须在里面再判一次：关掉之后 X 必须
+        -- 原样交还给原版，A 也不再自动展开材料列。
+        if not isEnabled() then
+            return original(listSelf, button, joypadData, ...)
+        end
         -- X is consumed unconditionally. Letting it fall through when there is
         -- no material to add is what made it reach the class-level favourite
         -- toggle again, which is the bug this wrap exists to prevent.
@@ -448,11 +467,32 @@ local function wrapRecipeList(self)
     end
 end
 
+-- 关掉开关时，之前写进去的 joypadNavigate 还挂在子控件上，方向键会继续按旧布局
+-- 跳。这里统一摘掉，回到原版「焦点停在面板、只能按 B 退出」的状态。
+local function clearNavigate(self)
+    local elements = {
+        getRecipeList(self),
+        getCraftControl(self),
+        getInventoryList(self),
+        getTakeButton(self),
+        getContainedList(self),
+    }
+    for index = 1, 5 do
+        local element = elements[index]
+        if type(element) == "table" then element.joypadNavigate = nil end
+    end
+end
+
 -- ---------------------------------------------------------------------------
 -- Wiring
 -- ---------------------------------------------------------------------------
 local originalUpdate = CraftLogicPanel.update
 CraftLogicPanel.update = function(self, ...)
+    if not isEnabled() then
+        clearNavigate(self)
+        if type(originalUpdate) == "function" then return originalUpdate(self, ...) end
+        return
+    end
     if type(originalUpdate) == "function" then
         local result = { originalUpdate(self, ...) }
         wrapRecipeList(self)
@@ -463,6 +503,12 @@ end
 
 local originalGainFocus = CraftLogicPanel.onGainJoypadFocus
 CraftLogicPanel.onGainJoypadFocus = function(self, joypadData)
+    if not isEnabled() then
+        if type(originalGainFocus) == "function" then
+            return originalGainFocus(self, joypadData)
+        end
+        return
+    end
     if type(originalGainFocus) == "function" then pcall(originalGainFocus, self, joypadData) end
     wrapRecipeList(self)
 
@@ -483,6 +529,13 @@ end
 -- picker is open, so that link comes and goes.
 local originalNavigateStart = CraftLogicPanel.onJoypadNavigateStart_Descendant
 CraftLogicPanel.onJoypadNavigateStart_Descendant = function(self, descendant, joypadData)
+    if not isEnabled() then
+        clearNavigate(self)
+        if type(originalNavigateStart) == "function" then
+            return originalNavigateStart(self, descendant, joypadData)
+        end
+        return
+    end
     local recipeList = getRecipeList(self)
     local craftControl = getCraftControl(self)
     local inventoryList = isReallyVisible(getInventoryList(self)) and getInventoryList(self) or nil
@@ -518,6 +571,12 @@ end
 
 local originalDownDescendant = CraftLogicPanel.onJoypadDown_Descendant
 CraftLogicPanel.onJoypadDown_Descendant = function(self, descendant, button, joypadData)
+    if not isEnabled() then
+        if type(originalDownDescendant) == "function" then
+            return originalDownDescendant(self, descendant, button, joypadData)
+        end
+        return
+    end
     if isJoypadButton(button, "XButton", "X") then
         -- Consumed even when there is nothing to add, so the class-level
         -- favourite toggle can never see it.
@@ -686,6 +745,7 @@ local function findCraftLogicPanel(window)
 end
 
 local function drawHeaderHints(window)
+    if not isEnabled() then return end
     local panel = findCraftLogicPanel(window)
     if not panel then return end
     local header = safeIndex(window, "entityHeader")
@@ -861,6 +921,7 @@ end
 local originalRender = CraftLogicPanel.render
 CraftLogicPanel.render = function(self, ...)
     if type(originalRender) == "function" then originalRender(self, ...) end
+    if not isEnabled() then return end
     if type(self.renderJoypadNavigateOverlay) == "function" then
         pcall(self.renderJoypadNavigateOverlay, self, getPlayerNum(self))
     end
