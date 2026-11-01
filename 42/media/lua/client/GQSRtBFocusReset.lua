@@ -439,6 +439,43 @@ local function closeWindow(entry)
     local name = entry.name
     local lowerName = string.lower(name or "")
 
+    -- Smart Radial Menu has its own undisplay() and session state machine. Hiding
+    -- it with setVisible(false) leaves enteredFirstTime / isFromOtherMenu /
+    -- hasSwappedMenu set, so the next D-pad Up press rebuilds a menu that
+    -- immediately undisplay()s (the "opens then vanishes" bug). Use SRM's own
+    -- undisplay() and reset the session flags so it can reopen cleanly.
+    if object.isSRM then
+        local playerNum = tonumber(entry.playerNum) or 0
+        local ok, err = pcall(function() object:undisplay() end)
+        local srm = rawget(_G, "SRMRadialMenu")
+        if type(srm) == "table" then
+            if type(srm.hasSwappedMenu) == "table" then
+                srm.hasSwappedMenu[playerNum] = false
+            end
+            local root = srm.SRMRootMenu and srm.SRMRootMenu[playerNum]
+            if root then
+                root.enteredFirstTime = false
+                root.isFromOtherMenu = false
+            end
+        end
+        if ok then
+            log("close-all closed " .. name .. " via SRM undisplay()")
+            return true
+        end
+        log("SRM undisplay() failed for " .. name .. ": " .. tostring(err))
+    end
+
+    -- Quick Clothing Actions wheel (a cached ISRadialMenu). Hiding it with
+    -- setVisible(false) leaves it stuck; use its own removeFromUIManager().
+    if object.Type == "QuickClothingActionRadial" then
+        local ok, err = pcall(function() object:removeFromUIManager() end)
+        if ok then
+            log("close-all closed " .. name .. " via QCA removeFromUIManager()")
+            return true
+        end
+        log("QCA removeFromUIManager() failed for " .. name .. ": " .. tostring(err))
+    end
+
     -- PZAPI/AtomUI windows are not ISUI elements: no close(), no isVisible(), no
     -- removeFromUIManager(). Their own close button only calls setVisible(false)
     -- (FishWindow.lua:304), which is exactly what we do here.

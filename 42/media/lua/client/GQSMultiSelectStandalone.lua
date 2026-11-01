@@ -27,6 +27,9 @@ local PREVIOUS_OPTIONS_ID = "CustomGamepadUI"
 
 local SELECT_ALL_COMBO = "L3 + R3"
 local COMBO_SELECT_ALL_GRACE_TICKS = 3
+-- How long R3 must stay held before "hold + move" becomes a sweep. Roughly
+-- 0.2s at 60fps: longer than a tap, shorter than an intentional hold.
+local SWEEP_HOLD_TICKS = 12
 
 local BUTTON_CHOICES = { "R2", "L2", "R3", "L3", "Select", "Start", "None" }
 local MULTI_SELECT_BUTTONS = BUTTON_CHOICES
@@ -101,6 +104,11 @@ local function playerState(playerNum)
             triggerActions = {},
             comboPending = {},
             selectAllComboDown = false,
+            sweepPane = nil,
+            sweepLastIndex = nil,
+            r3HoldTicks = 0,
+            r3PressIndex = nil,
+            r3PressPane = nil,
         }
         GMS.players[key] = state
     end
@@ -336,11 +344,13 @@ local function applyPersistentSelection(pane)
     end
 end
 
-local function toggleFocusedSelection(pane)
+local function toggleRowSelection(pane, index)
     if not GMS.isEnabled() or not pane or not pane.items then return false end
-    local index = (tonumber(pane.joyselection) or -1) + 1
+    if not index then
+        index = (tonumber(pane.joyselection) or -1) + 1
+    end
     local row = pane.items[index]
-    if index < 1 or not row then return false end
+    if not index or index < 1 or not row then return false end
 
     pane.firstSelect = index
     pane.gmsKeepSelection = true
@@ -546,7 +556,18 @@ local function performMultiSelect(pane)
     -- R3 selects/deselects one row and establishes the range anchor.
     -- The item token is more stable than storing a raw row index.
     pane.gmsRangeAnchor = rowToken(pane.items[index])
-    return toggleFocusedSelection(pane)
+    return toggleRowSelection(pane, index)
+end
+
+-- Deferred variant: the row is pinned when the button went down. Without this
+-- a tap followed by a quick direction press toggles whatever row the cursor has
+-- already moved to, which is not the row the player pressed R3 on.
+local function performMultiSelectAt(pane, index)
+    if not pane or not pane.items or not index then return false end
+    local row = pane.items[index]
+    if not row then return false end
+    pane.gmsRangeAnchor = rowToken(row)
+    return toggleRowSelection(pane, index)
 end
 
 local function buttonNameFromCode(button)
@@ -555,13 +576,113 @@ local function buttonNameFromCode(button)
     return nil
 end
 
+-- R3 hold sweep. While the multi-select button stays held down, every row the
+-- focus passes over is added to the selection, so "R3, down, R3, down" becomes
+-- "hold R3 and push down". Rows are only ever added, never toggled off: sweeping
+-- back over the same rows keeps the selection stable instead of flipping it.
+local function ensureRowSelected(pane, index)
+    if not pane or not pane.items or not index then return false end
+    local row = pane.items[index]
+    if not row then return false end
+
+    pane.firstSelect = index
+    pane.gmsKeepSelection = true
+
+    local saved = selectionState(pane)
+    if rowIsSelected(saved, row) then return false end
+    markRowSelected(saved, row)
+    applyPersistentSelection(pane)
+    return true
+end
+
+local function resetSweep(state)
+    state.sweepPane = nil
+    state.sweepLastIndex = nil
+    state.r3HoldTicks = 0
+    state.r3PressIndex = nil
+    state.r3PressPane = nil
+end
+
+local function processHoldSweep(playerNum)
+    local state = playerState(playerNum)
+
+    -- The sweep only makes sense when R3 is the multi-select binding; the other
+    -- choices (R2/L2) are triggers and have their own press handling.
+    if not GMS.isEnabled() or GMS.getMultiSelectButton() ~= "R3" then
+        resetSweep(state)
+        return
+    end
+
+    local pane = resolveFocusedPaneForPlayer(playerNum)
+    if not pane or not isStickButtonDown(playerNum, "R3") then
+        resetSweep(state)
+        return
+    end
+
+    -- Arm the sweep only after a real hold. A quick tap that happens to be
+    -- followed by a direction press must stay a single-row toggle; without this
+    -- gate the press row and the very next row both end up selected.
+    state.r3HoldTicks = (state.r3HoldTicks or 0) + 1
+    if state.r3HoldTicks <= SWEEP_HOLD_TICKS then
+        state.sweepPane = nil
+        state.sweepLastIndex = nil
+        return
+    end
+
+    local index = focusedRowIndex(pane)
+    if not index then return end
+
+    -- A different pane (container switch, page change) restarts the sweep so the
+    -- previous container's row number is never applied to the new list.
+    if state.sweepPane ~= pane then
+        state.sweepPane = pane
+        -- Start from the row that had focus when R3 went down, not from the row
+        -- the cursor has already reached during the arming delay, so nothing
+        -- scrolled past is skipped.
+        local anchor = index
+        if state.r3PressPane == pane and state.r3PressIndex then
+            local count = pane.items and #pane.items or 0
+            if state.r3PressIndex >= 1 and state.r3PressIndex <= count then
+                anchor = state.r3PressIndex
+            end
+        end
+        state.sweepLastIndex = anchor
+        return
+    end
+    if index == state.sweepLastIndex then return end
+
+    -- The deferred single toggle for this press targets whatever row has focus
+    -- when it fires, which is the row we are about to add - it would flip that
+    -- row straight back off. Drop it and fill the traversed span explicitly.
+    clearComboPending(state)
+    local fromIndex = state.sweepLastIndex
+    local step = (index >= fromIndex) and 1 or -1
+    local added = 0
+    local row = fromIndex
+    while true do
+        if ensureRowSelected(pane, row) then added = added + 1 end
+        if row == index then break end
+        row = row + step
+    end
+    state.sweepLastIndex = index
+    log("R3 hold sweep " .. tostring(fromIndex) .. " -> " .. tostring(index)
+        .. " (added=" .. tostring(added) .. ")")
+end
+
 -- When L3+R3 is the select-all binding, briefly defer their ordinary L3/R3
 -- actions. This gives the second button time to arrive, so a chord does not
 -- first perform a range/single selection and then toggle select-all.
-local function queueComboIndividualAction(playerNum, buttonName, actionKey)
+local function queueComboIndividualAction(playerNum, buttonName, actionKey, pane)
     local state = playerState(playerNum)
     state.comboPending = state.comboPending or {}
-    state.comboPending[buttonName] = { action = actionKey, ticks = 0 }
+    -- Pin the row that has focus right now. The deferred action fires a few
+    -- ticks later, by which time a quick direction press may have moved the
+    -- cursor; the player still expects the row they pressed on to be toggled.
+    state.comboPending[buttonName] = {
+        action = actionKey,
+        ticks = 0,
+        index = focusedRowIndex(pane),
+    }
 end
 
 local function handleComboButtonPress(playerNum, button, pane, multiName, rangeName)
@@ -588,7 +709,7 @@ local function handleComboButtonPress(playerNum, button, pane, multiName, rangeN
         actionKey = "range"
     end
     if actionKey then
-        queueComboIndividualAction(playerNum, buttonName, actionKey)
+        queueComboIndividualAction(playerNum, buttonName, actionKey, pane)
         return true
     end
     return false
@@ -627,7 +748,7 @@ local function processComboSelectAll(playerNum)
             local pane = resolveFocusedPaneForPlayer(playerNum)
             if pane then
                 if pending.action == "multi" then
-                    performMultiSelect(pane)
+                    performMultiSelectAt(pane, pending.index or focusedRowIndex(pane))
                 elseif pending.action == "range" then
                     selectRange(pane, focusedRowIndex(pane))
                 end
@@ -742,6 +863,17 @@ local function wrapPageClass(pageClass)
                 local playerNum = tonumber(self.player) or 0
                 local pane = GMS.resolveFocusedPane(self)
                 if pane then
+                    -- Stamp every R3 press with the row it landed on. Both the
+                    -- deferred single toggle and the hold-sweep anchor read this,
+                    -- so a press is never applied to a row the cursor drifted to.
+                    local r3Code = GMS.resolveButtonCode("R3")
+                    if r3Code ~= nil and button == r3Code then
+                        local state = playerState(playerNum)
+                        resetSweep(state)
+                        state.r3PressIndex = focusedRowIndex(pane)
+                        state.r3PressPane = pane
+                    end
+
                     -- If a multi-selection is active and A is pressed on a row
                     -- outside that selection, clear the stale selection BEFORE
                     -- vanilla/CleanUI handles A. Otherwise the old selection
@@ -749,8 +881,7 @@ local function wrapPageClass(pageClass)
                     -- previously selected rows instead of the focused row (or
                     -- interfering with expanding/collapsing equipped groups).
                     local joypad = rawget(_G, "Joypad")
-                    local aButton = joypad and (joypad.AButton or joypad.A) or nil
-                    local savedSelection = pane.gmsSelectionState
+                    local aButton = joypad and (joypad.AButton or joypad.A) or nil                    local savedSelection = pane.gmsSelectionState
                     if aButton ~= nil and button == aButton
                         and pane.gmsKeepSelection == true
                         and hasAnyEntries(savedSelection) then
@@ -1017,6 +1148,7 @@ local function monitorWindows()
         state.lootPage = lootPage
 
         processComboSelectAll(playerNum)
+        processHoldSweep(playerNum)
         pollTriggerAction(playerNum, "multi", GMS.getMultiSelectButton(), function(pane) return performMultiSelect(pane) end)
         pollTriggerAction(playerNum, "all", GMS.getSelectAllButton(), function(pane) return selectAll(pane) end)
         pollTriggerAction(playerNum, "range", GMS.getRangeSelectButton(), function(pane) return selectRange(pane, focusedRowIndex(pane)) end)

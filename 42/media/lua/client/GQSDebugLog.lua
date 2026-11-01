@@ -21,6 +21,10 @@ local DEFAULT_CATEGORIES = {
     mixedAutoDrink = false,
     furnitureRotate = false, -- verified in game; enable to trace rotation decisions
     craftLogic = false, -- leather drying rack joypad; flip to true to trace auto-add
+    flyerJoypad = false, -- print-media controller binding; failures still print unconditionally via warn()
+    washHold = false, -- wash/self-wash hold-to-stop; failures still print unconditionally via warn()
+    srmCompat = false, -- Smart Radial Menu wheel compatibility
+    qcaCompat = false, -- Quick Clothing Actions wheel compatibility
 }
 
 local LABELS = {
@@ -43,6 +47,10 @@ local LABELS = {
     mixedAutoDrink = "Mixed Auto Drink",
     furnitureRotate = "Furniture Rotate",
     craftLogic = "Craft Logic Panel",
+    flyerJoypad = "Flyer Joypad",
+    washHold = "Wash Hold",
+    srmCompat = "Smart Radial Compat",
+    qcaCompat = "Quick Clothing Compat",
 }
 
 local config = rawget(_G, "GQS_DEBUG_CONFIG")

@@ -11,6 +11,15 @@ local function debugLog(message)
     end
 end
 
+-- SRM compatibility logging goes to the srmCompat category so it can be enabled
+-- independently of the rightRadial trace.
+local function srmLog(message)
+    local logger = rawget(_G, "GQSLog")
+    if logger and type(logger.log) == "function" then
+        logger.log("srmCompat", message)
+    end
+end
+
 local function optionEnabled(optionName, fallback)
     local option = GQS and GQS[optionName]
     if not option or type(option.getValue) ~= "function" then return fallback end
@@ -585,7 +594,7 @@ end
 registerBuiltInLightSwitchProvider()
 registerBuiltInSmashWindowProvider()
 
-local function addNeighborSlices(player, menu)
+local function addNeighborSlices(player, menu, includeFront)
     local square = player:getCurrentSquare()
     if not square then return false end
     local playerIndex = player:getPlayerNum()
@@ -594,9 +603,9 @@ local function addNeighborSlices(player, menu)
     local found, added, seenSquare = {}, false, {}
     for dx = -1, 1 do
         for dy = -1, 1 do
-            if dx ~= 0 or dy ~= 0 then
+            if includeFront or dx ~= 0 or dy ~= 0 then
                 local nearby = cell:getGridSquare(square:getX() + dx, square:getY() + dy, square:getZ())
-                if nearby and nearby ~= front and not seenSquare[nearby] then
+                if nearby and (includeFront or nearby ~= front) and not seenSquare[nearby] then
                     seenSquare[nearby] = true
                     local objects = nearby:getObjects()
                     for i = 0, objects:size() - 1 do
@@ -755,6 +764,11 @@ local function install()
             menu:clear()
             local option = GQS.tileRadialMenu
             local enabled = option and type(option.getValue) == "function" and option:getValue() == true
+            -- Belt-and-braces: if Smart Radial Menu is loaded, never add our
+            -- slices to the vanilla wheel (SRM only opens its own wheel when the
+            -- vanilla one is empty). install() usually skips this wrapper
+            -- entirely when SRM is active; this guards a late detection.
+            if enabled and rawget(_G, "SRMRadialMenu") ~= nil then enabled = false end
             local extensionAdded = false
             local originalAdd = menu.addToUIManager
             local ownAdd = rawget(menu, "addToUIManager")
@@ -821,6 +835,48 @@ local function install()
                     hasNativeContext = animalOk and target ~= nil
                 end
             end
+            -- Smart Radial compatibility: when SRM is active and there is no
+            -- vehicle/animal context, open the SRM wheel directly and append our
+            -- contextual slices to it. SRM only shows its own wheel when the
+            -- vanilla wheel is empty, and CGUI always fills the vanilla wheel,
+            -- so bypass it entirely.
+            local srm = rawget(_G, "SRMRadialMenu")
+            if srm and not hasNativeContext and player then
+                local playerNum = playerIndex or 0
+                if type(srm.hasSwappedMenu) == "table" then srm.hasSwappedMenu[playerNum] = false end
+                local okShow, errShow = pcall(function() srm.showRadialMenu(player) end)
+                local srmMenu = srm.SRMRootMenu and srm.SRMRootMenu[playerNum]
+                local added = false
+                if srmMenu then
+                    srmMenu.isFromOtherMenu = false
+                    local okAdd, addResult = pcall(function()
+                        local adapter = {
+                            addSlice = function(_, label, texture, callback, ...)
+                                local base = rawget(_G, "ISRadialMenu")
+                                if type(base) == "table" and type(base.addSlice) == "function" then
+                                    return base.addSlice(srmMenu, label, texture, callback, ...)
+                                end
+                                return srmMenu:addSlice(label, texture, callback, nil, nil, nil, nil, ...)
+                            end,
+                        }
+                        return GQSTileRadialMenuFix.addContextSlices(player, adapter, true)
+                    end)
+                    added = okAdd and addResult == true
+                    if added then pcall(function() srmMenu:center() end) end
+                    if not okAdd then srmLog("SRM append failed: " .. tostring(addResult)) end
+                end
+                local hasContent = false
+                if srmMenu then
+                    local okEmpty, empty = pcall(function() return srmMenu:isEmpty() end)
+                    hasContent = okEmpty and empty == false
+                end
+                srmLog("SRM branch: show=" .. tostring(okShow) .. " menu=" .. tostring(srmMenu ~= nil)
+                    .. " added=" .. tostring(added) .. " hasContent=" .. tostring(hasContent))
+                if okShow and hasContent then return end
+                if not okShow then srmLog("SRM showRadialMenu failed: " .. tostring(errShow)) end
+                -- SRM had nothing to show; fall through to the vanilla wheel.
+            end
+
             if not hasNativeContext then return originalOnDisplayUp(joypadData, ...) end
 
             local previous = suppressCustomWheel
@@ -837,5 +893,10 @@ local function install()
 end
 if Events and Events.OnGameBoot then Events.OnGameBoot.Add(install) end
 if Events and Events.OnGameStart then Events.OnGameStart.Add(install) end
+
+-- Exposed for GQSSmartRadialCompat: append the contextual world-object slices to
+-- an external radial menu (Smart Radial Menu) through an adapter table that
+-- implements addSlice with the vanilla ISRadialMenu signature.
+GQSTileRadialMenuFix.addContextSlices = addNeighborSlices
 
 return GQSTileRadialMenuFix

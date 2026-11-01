@@ -243,16 +243,40 @@ local function gqsOpenSkillsPanel(player)
     gqsScheduleSkillsFocus(playerNum, infoWindow, skillsLabel)
 end
 
-local function addSliceSafely(menu, label, texturePath, callback, player)
+local function addSliceSafely(menu, label, textureOrPath, callback, player)
     local icon = nil
-    if texturePath and type(getTexture) == "function" then
-        local okTexture, texture = pcall(getTexture, texturePath)
-        if okTexture then icon = texture end
+    if type(textureOrPath) == "string" then
+        if type(getTexture) == "function" then
+            local okTexture, texture = pcall(getTexture, textureOrPath)
+            if okTexture then icon = texture end
+        end
+    else
+        -- Already a Texture object (e.g. an item's inventory icon).
+        icon = textureOrPath
     end
     local okAdd, err = pcall(function()
         menu:addSlice(label, icon, callback, player)
     end)
     if not okAdd then debugLog("failed to append '" .. tostring(label) .. "': " .. tostring(err)) end
+end
+
+-- Use the real inventory icon of a T-shirt (the same art shown in the item
+-- list), not the 3D model UV texture (which looks like a flat cloth).
+local function gqsQuickClothingIcon()
+    if type(instanceItem) ~= "function" then return nil end
+    local ids = {
+        "Base.Tshirt_Profession_FiremanRed",
+        "Base.Tshirt_Sport",
+        "Base.Tshirt_White",
+    }
+    for i = 1, #ids do
+        local okItem, item = pcall(instanceItem, ids[i])
+        if okItem and item and type(item.getTexture) == "function" then
+            local okTex, texture = pcall(item.getTexture, item)
+            if okTex and texture then return texture end
+        end
+    end
+    return nil
 end
 
 local function gqsAddRightRadialSlices(joypadData)
@@ -268,6 +292,13 @@ local function gqsAddRightRadialSlices(joypadData)
     if optionEnabled("rightRadialSkillsEnabled", true) then
         addSliceSafely(menu, getText("UI_GQOS_RightRadialSkills"),
             "media/ui/icon_skill_book.png", gqsOpenSkillsPanel, player)
+    end
+    -- Quick Clothing Actions: open QCA's clothing wheel from the right wheel.
+    local qcaCompat = rawget(_G, "GQSQuickClothingCompat")
+    if qcaCompat and type(qcaCompat.open) == "function" and type(qcaCompat.isAvailable) == "function"
+        and qcaCompat.isAvailable() and optionEnabled("rightRadialQuickClothingEnabled", true) then
+        addSliceSafely(menu, getText("UI_GQOS_RightRadialQuickClothing"),
+            gqsQuickClothingIcon(), function(p) qcaCompat.open(p) end, player)
     end
 end
 

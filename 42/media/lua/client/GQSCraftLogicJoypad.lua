@@ -102,6 +102,47 @@ local function getTakeButton(self)
     return safeIndex(safeIndex(safeIndex(self, "recipePanel"), "outputProgressWidget"), "buttonTake")
 end
 
+-- 「小型植物晾晒架」那一整块：进行中 + 完成 + 全部拿走 都属于这个控件
+-- （ISWidgetCraftLogicOutputProgress）。导航上把它当成**一个**区域。
+local function getProgressWidget(self)
+    return safeIndex(safeIndex(self, "recipePanel"), "outputProgressWidget")
+end
+
+-- 「进行中」的物品格：ISWidgetCraftLogicOutputProgress 把那个 ISItemSlotPanel 挂在
+-- `.progressItems` 上。已知路径先直取（getTakeButton 用的就是这条，一定能走通），
+-- 走不通再广搜 children，最后退回「渲染时抓到的那个」。
+local liveGrid = setmetatable({}, { __mode = "k" })
+
+local function getProgressGrid(self)
+    if type(self) ~= "table" then return nil end
+
+    local direct = safeIndex(safeIndex(safeIndex(self, "recipePanel"), "outputProgressWidget"), "progressItems")
+    if type(direct) == "table" then return direct end
+
+    local queue = { self }
+    local visited = 0
+    while #queue > 0 and visited < 400 do
+        visited = visited + 1
+        local node = table.remove(queue, 1)
+        local grid = safeIndex(node, "progressItems")
+        if type(grid) == "table" then return grid end
+        local children = safeIndex(node, "children")
+        if type(children) == "table" then
+            for index = 1, #children do
+                if type(children[index]) == "table" then
+                    queue[#queue + 1] = children[index]
+                end
+            end
+        end
+    end
+
+    -- 最后一条路：渲染时挂上的那个（只可能有一个晾晒面板开着）。
+    for grid in pairs(liveGrid) do
+        return grid
+    end
+    return nil
+end
+
 local function getPlayerNum(self)
     local playerNum = tonumber(safeIndex(self, "playerNum"))
     if playerNum then return playerNum end
@@ -476,12 +517,207 @@ local function clearNavigate(self)
         getInventoryList(self),
         getTakeButton(self),
         getContainedList(self),
+        getProgressWidget(self),
     }
-    for index = 1, 5 do
+    for index = 1, 6 do
         local element = elements[index]
         if type(element) == "table" then element.joypadNavigate = nil end
     end
+    local slots = safeIndex(getProgressGrid(self), "itemSlots")
+    if type(slots) == "table" then
+        for index = 1, #slots do
+            if type(slots[index]) == "table" then slots[index].joypadNavigate = nil end
+        end
+    end
+    local craftChildren = safeIndex(getCraftControl(self), "children")
+    if type(craftChildren) == "table" then
+        for index = 1, #craftChildren do
+            if type(craftChildren[index]) == "table" then craftChildren[index].joypadNavigate = nil end
+        end
+    end
 end
+
+-- 「进行中 + 完成 + 全部拿走」整块当成**一个**导航区域：
+-- 焦点落在 ISWidgetCraftLogicOutputProgress 这个控件本身，白框就框住整块；
+-- 区域内部选哪一格由我们自己记（regionIndex），普通方向键左右切换。
+local gridProbeLogged = false
+
+local function wireProgressRegion(self, recipeList, craftControl, containedList)
+    local widget = getProgressWidget(self)
+    if type(widget) ~= "table" then
+        if not gridProbeLogged then
+            gridProbeLogged = true
+            print("[GQS] progress widget NOT found; the drying area stays unreachable")
+        end
+        return nil
+    end
+    local slots = safeIndex(getProgressGrid(self), "itemSlots")
+    local count = (type(slots) == "table") and #slots or 0
+    if not gridProbeLogged then
+        gridProbeLogged = true
+        print("[GQS] drying area wired: " .. tostring(count) .. " slot(s) + take-all")
+    end
+
+    -- 整块一个区域：RB 导航只负责「跳出去」。
+    widget.joypadNavigate = {
+        left = recipeList,
+        right = containedList,
+        up = craftControl,
+    }
+
+    -- 里面的格子和「全部拿走」不再是独立焦点，摘掉它们的导航表，
+    -- 免得 RB 长按时各自再亮一个白框。
+    if type(slots) == "table" then
+        for index = 1, #slots do
+            if type(slots[index]) == "table" then slots[index].joypadNavigate = nil end
+        end
+    end
+    local takeButton = getTakeButton(self)
+    if type(takeButton) == "table" then takeButton.joypadNavigate = nil end
+
+    -- 制作/取消那个控件本身可能是容器，焦点实际落在里面的按钮上。
+    -- 给它们补一条「按下进入晾晒区域」。
+    local children = safeIndex(craftControl, "children")
+    if type(children) == "table" then
+        for index = 1, #children do
+            local child = children[index]
+            if type(child) == "table" and type(safeIndex(child, "joypadNavigate")) ~= "table" then
+                child.joypadNavigate = { down = widget }
+            end
+        end
+    end
+
+    return widget
+end
+
+-- 把整个面板的方向键链路重建一遍。onGainJoypadFocus 和
+-- onJoypadNavigateStart_Descendant 都要用，抽出来避免两处走样。
+local function rewireNavigation(self)
+    local recipeList = getRecipeList(self)
+    local craftControl = getCraftControl(self)
+    local inventoryList = isReallyVisible(getInventoryList(self)) and getInventoryList(self) or nil
+    local containedList = isReallyVisible(getContainedList(self)) and getContainedList(self) or nil
+
+    local region = wireProgressRegion(self, recipeList, craftControl, containedList)
+
+    if recipeList then
+        -- RB+下 直接进晾晒区域（整块）。
+        recipeList.joypadNavigate = { right = craftControl, down = region }
+    end
+    if craftControl then
+        craftControl.joypadNavigate = {
+            left = recipeList,
+            right = inventoryList,
+            down = region,
+        }
+    end
+    if inventoryList then
+        inventoryList.joypadNavigate = { left = craftControl, down = containedList }
+    end
+    if containedList then
+        containedList.joypadNavigate = { up = inventoryList, left = region }
+    end
+
+    return region
+end
+
+-- ---------------------------------------------------------------------------
+-- 晾晒区域内的「普通方向键」
+-- ---------------------------------------------------------------------------
+-- PZ 的 UI 导航只在按住 RB 期间有效（JoyPadSetup:onHoldButton 按住 RB 才
+-- startNavigation，松开就 endNavigation），所以 RB+方向 天生一次只能走一格。
+-- 但非导航模式下方向键是直接发给焦点元素的 onJoypadDirX 的
+-- （JoyPadSetup:onPressUp/Down/Left/Right 里 `focus:onJoypadDirLeft(joypadData)`），
+-- 所以只要焦点停在晾晒区域里，我们自己接管 _Descendant 就能用普通方向键走。
+--
+-- 区域 = 进行中的格子 + 「全部拿走」，串成一条横向链：
+--   格子1 → 格子2 → … → 格子N → 全部拿走
+-- 焦点本身停在整块控件上（这样白框框住整块），「现在选到哪一个」记在控件字段里。
+-- 上下在区域内不响应（吃掉按键，不做任何事）。
+
+-- 区域里一共有几项、当前选到第几项（1..#slots 是格子，最后一格是「全部拿走」）。
+local function regionSelection(self)
+    local slots = safeIndex(getProgressGrid(self), "itemSlots")
+    local count = (type(slots) == "table") and #slots or 0
+    local hasTake = type(getTakeButton(self)) == "table"
+    local total = count + (hasTake and 1 or 0)
+    if total == 0 then return nil end
+
+    local widget = getProgressWidget(self)
+    local index = tonumber(safeIndex(widget, "_gqsRegionIndex")) or 1
+    if index < 1 then index = 1 end
+    if index > total then index = total end
+    return index, slots, count, total
+end
+
+local function setRegionSelection(self, index)
+    local widget = getProgressWidget(self)
+    if type(widget) == "table" then widget._gqsRegionIndex = index end
+end
+
+-- 焦点是不是落在这个区域里（整块控件本身，或者万一落在某个格子上）。
+local function isInProgressRegion(self, descendant)
+    if descendant == nil then return false end
+    local widget = getProgressWidget(self)
+    if descendant == widget then return true end
+    local slots = safeIndex(getProgressGrid(self), "itemSlots")
+    if type(slots) == "table" then
+        for index = 1, #slots do
+            if slots[index] == descendant then return true end
+        end
+    end
+    return descendant == getTakeButton(self)
+end
+
+local function handlePlainDirection(self, descendant, joypadData, direction)
+    if not isInProgressRegion(self, descendant) then return false end
+
+    -- 上下：区域内不响应
+    if direction ~= "left" and direction ~= "right" then return true end
+
+    local index, slots, count, total = regionSelection(self)
+    if index == nil then return false end
+
+    local nextIndex = index + (direction == "right" and 1 or -1)
+    if nextIndex < 1 then return false end -- 链头，交还原版
+    if nextIndex > total then return true end -- 链尾，吃掉按键停在原地
+
+    setRegionSelection(self, nextIndex)
+    return true
+end
+
+local originalDirLeftDescendant = CraftLogicPanel.onJoypadDirLeft_Descendant
+CraftLogicPanel.onJoypadDirLeft_Descendant = function(self, descendant, joypadData)
+    if isEnabled() and handlePlainDirection(self, descendant, joypadData, "left") then return end
+    if type(originalDirLeftDescendant) == "function" then
+        return originalDirLeftDescendant(self, descendant, joypadData)
+    end
+end
+
+local originalDirRightDescendant = CraftLogicPanel.onJoypadDirRight_Descendant
+CraftLogicPanel.onJoypadDirRight_Descendant = function(self, descendant, joypadData)
+    if isEnabled() and handlePlainDirection(self, descendant, joypadData, "right") then return end
+    if type(originalDirRightDescendant) == "function" then
+        return originalDirRightDescendant(self, descendant, joypadData)
+    end
+end
+
+local originalDirUpDescendant = CraftLogicPanel.onJoypadDirUp_Descendant
+CraftLogicPanel.onJoypadDirUp_Descendant = function(self, descendant, joypadData)
+    if isEnabled() and handlePlainDirection(self, descendant, joypadData, "up") then return end
+    if type(originalDirUpDescendant) == "function" then
+        return originalDirUpDescendant(self, descendant, joypadData)
+    end
+end
+
+local originalDirDownDescendant = CraftLogicPanel.onJoypadDirDown_Descendant
+CraftLogicPanel.onJoypadDirDown_Descendant = function(self, descendant, joypadData)
+    if isEnabled() and handlePlainDirection(self, descendant, joypadData, "down") then return end
+    if type(originalDirDownDescendant) == "function" then
+        return originalDirDownDescendant(self, descendant, joypadData)
+    end
+end
+
 
 -- ---------------------------------------------------------------------------
 -- Wiring
@@ -518,6 +754,9 @@ CraftLogicPanel.onGainJoypadFocus = function(self, joypadData)
         toggleInputPicker(self)
     end
 
+    -- 焦点默认给配方列表（用户 2026-10-31 明确要求）。晾晒格子的入口从
+    -- 配方列表按「下」或者从「制作」按「下」都能进去。
+    rewireNavigation(self)
     if setFocus(joypadData, getRecipeList(self)) then
         log("focus handed to the recipe list")
     else
@@ -536,33 +775,8 @@ CraftLogicPanel.onJoypadNavigateStart_Descendant = function(self, descendant, jo
         end
         return
     end
-    local recipeList = getRecipeList(self)
-    local craftControl = getCraftControl(self)
-    local inventoryList = isReallyVisible(getInventoryList(self)) and getInventoryList(self) or nil
-    local takeButton = getTakeButton(self)
-    local containedList = isReallyVisible(getContainedList(self)) and getContainedList(self) or nil
-
-    if recipeList then
-        recipeList.joypadNavigate = { right = craftControl, down = takeButton }
-    end
-    if craftControl then
-        craftControl.joypadNavigate = {
-            left = recipeList,
-            right = inventoryList,
-            down = takeButton,
-        }
-    end
-    if takeButton then
-        -- Up goes back to the craft button (not the recipe list), left returns
-        -- to the recipe list, right reaches the contained-items column.
-        takeButton.joypadNavigate = { up = craftControl, left = recipeList, right = containedList }
-    end
-    if inventoryList then
-        inventoryList.joypadNavigate = { left = craftControl, down = containedList }
-    end
-    if containedList then
-        containedList.joypadNavigate = { up = inventoryList, left = takeButton }
-    end
+    -- 每次导航开始都重建一遍：制作/取消、可用物品列的存在与否会变。
+    rewireNavigation(self)
 
     if type(originalNavigateStart) == "function" then
         return originalNavigateStart(self, descendant, joypadData)
@@ -584,6 +798,15 @@ CraftLogicPanel.onJoypadDown_Descendant = function(self, descendant, button, joy
         return
     elseif isJoypadButton(button, "YButton", "Y") then
         if takeAllOutputs(self) then return end
+    elseif isJoypadButton(button, "AButton", "A") then
+        -- 区域里左右选到「全部拿走」时，按 A 直接执行。
+        if isInProgressRegion(self, descendant) then
+            local index, slots, count, total = regionSelection(self)
+            if index ~= nil and index == total and total > count then
+                takeAllOutputs(self)
+                return
+            end
+        end
     elseif isStickPress(button, "LStickButton") then
         cycleSortMode(self)
         return
@@ -931,3 +1154,258 @@ end
 
 CraftLogicPanel._gqsCraftLogicJoypadInstalled = true
 log("CraftLogic panel joypad navigation installed")
+
+-- ---------------------------------------------------------------------------
+-- Drying progress readout: replay the vanilla tooltip, arranged in a grid
+-- ---------------------------------------------------------------------------
+-- 原版把「进度 / 剩余时间 / 温度 / 湿度 / 干燥率」全部画在鼠标 tooltip 里：
+-- ISWidgetCraftLogicOutputProgress 把 drawTooltip 接到
+-- CraftLogicUILogic:doProgressSlotTooltip()，Java 侧现场往 ObjectTooltip 上画。
+--
+-- 这些数字 Lua 一个都拿不到，也没法自己算（v1.5.12.2 试过，全部失败）：
+--   * getDryingFactor() 是 private（method flags 0x0002），调不到 → 温度、干燥率没了；
+--   * 湿度存在 DryingCraftLogic.temporaryWetnesses（private final HashMap，无 getter），
+--     而且是逐帧累积 / 衰减的状态量，反推不出来；
+--   * ObjectTooltip$Layout / LayoutItem 只有 setter，没有 getter，抓不到文本；
+--   * 反射也走不通：craft:getClass() 拿得到，但 java.lang.Class 的方法没暴露给
+--     Kahlua（class:getDeclaredField 是 nil）。
+-- 所以唯一能拿到完整信息的办法，就是把那个 tooltip 本身重放一遍。
+--
+-- 两件事必须注意：
+--   1. 绘制放在 Events.OnPostUIDraw 里。挂在面板 render 之后会被面板 / 父控件的
+--      stencil 裁掉，只剩前两三行（v1.5.12.1 就是这么翻车的）。
+--   2. ObjectTooltip 自己不会画底色 —— render() 一开头 isVisible() / alphaF 不满足
+--      就直接 return，只留下文字。所以底色由我们自己补：拿一个 0×0 的 ISUIElement
+--      当画笔（坐标即屏幕坐标），在每个 tooltip 后面垫一块深色卡片。
+--
+-- 排版：先量出所有物品格的 tooltip 尺寸，取最大值当单元格，然后按面板宽度铺成
+-- 多列网格（最多 4 列），而不是一路竖直往下排。
+local tooltips = setmetatable({}, { __mode = "k" })
+local pending = setmetatable({}, { __mode = "k" })
+
+local CARD_PAD_X = 5
+local CARD_PAD_Y = 3
+
+local drawHelper = nil
+
+-- 0×0 的 ISUIElement 只当画笔用：它的 drawRect / drawRectBorder 直接把颜色画到
+-- 屏幕上，坐标就是屏幕坐标（元素自己在 0,0）。
+local function helperElement()
+    if drawHelper ~= nil then
+        if drawHelper == false then return nil end
+        return drawHelper
+    end
+    local elementClass = rawget(_G, "ISUIElement")
+    if type(elementClass) ~= "table" then
+        drawHelper = false
+        return nil
+    end
+    local created = nil
+    local ok = pcall(function()
+        local element = elementClass:new(0, 0, 1, 1)
+        element:initialise()
+        element:instantiate()
+        created = element
+    end)
+    if not ok or created == nil then
+        log("could not create a draw helper; the drying readout has no background", true)
+        drawHelper = false
+        return nil
+    end
+    drawHelper = created
+    return created
+end
+
+local function fillRect(x, y, w, h, a, r, g, b)
+    local helper = helperElement()
+    if helper == nil then return end
+    pcall(helper.drawRect, helper, x, y, w, h, a, r, g, b)
+end
+
+local function strokeRect(x, y, w, h, a, r, g, b)
+    local helper = helperElement()
+    if helper == nil then return end
+    pcall(helper.drawRectBorder, helper, x, y, w, h, a, r, g, b)
+end
+
+local function tooltipFor(slot)
+    local tip = tooltips[slot]
+    if tip ~= nil then return tip end
+    local tooltipClass = rawget(_G, "ObjectTooltip")
+    if type(tooltipClass) ~= "table" then return nil end
+    local okNew, created = pcall(tooltipClass.new)
+    if not okNew or created == nil then return nil end
+    tooltips[slot] = created
+    return created
+end
+
+-- 量一遍：和 ISToolTipItemSlot:render 一样，tooltip 只有在绘制过程中才知道自己
+-- 该多宽多高。
+local function measureTooltip(tip, slot, logic)
+    pcall(function() tip:setX(0) end)
+    pcall(function() tip:setY(0) end)
+    pcall(function() tip:setWidth(50) end)
+    pcall(function() tip:setMeasureOnly(true) end)
+    local ok = pcall(function() logic:doProgressSlotTooltip(slot, tip) end)
+    pcall(function() tip:setMeasureOnly(false) end)
+    if not ok then return 0, 0 end
+
+    local width, height = 0, 0
+    local okWidth, value = pcall(function() return tip:getWidth() end)
+    if okWidth then width = tonumber(value) or 0 end
+    local okHeight, valueH = pcall(function() return tip:getHeight() end)
+    if okHeight then height = tonumber(valueH) or 0 end
+    return width, height
+end
+
+local function paintTooltip(tip, slot, logic, x, y)
+    pcall(function() tip:setX(x) end)
+    pcall(function() tip:setY(y) end)
+    pcall(function() logic:doProgressSlotTooltip(slot, tip) end)
+end
+
+local function screenSize()
+    if type(getCore) ~= "function" then return 0, 0 end
+    local ok, core = pcall(getCore)
+    if not ok or core == nil then return 0, 0 end
+    local okW, width = pcall(function() return core:getScreenWidth() end)
+    local okH, height = pcall(function() return core:getScreenHeight() end)
+    if not okW or not okH then return 0, 0 end
+    return tonumber(width) or 0, tonumber(height) or 0
+end
+
+local function slotRect(slot)
+    local x, y, w, h = 0, 0, 0, 0
+    local ok, value = pcall(function() return slot:getAbsoluteX() end)
+    if ok then x = tonumber(value) or 0 end
+    ok, value = pcall(function() return slot:getAbsoluteY() end)
+    if ok then y = tonumber(value) or 0 end
+    w = tonumber(safeIndex(slot, "width")) or 0
+    h = tonumber(safeIndex(slot, "height")) or 0
+    return x, y, w, h
+end
+
+-- 手柄焦点是不是落在晾晒区域里（整块控件本身，或万一落在某个格子上）。
+local function progressRegionHasFocus(playerNum, widget, slots)
+    if type(getJoypadData) ~= "function" then return false end
+    local ok, data = pcall(getJoypadData, playerNum)
+    if not ok or data == nil then return false end
+    local focus = data.focus
+    if focus == nil then return false end
+    if focus == widget then return true end
+    for index = 1, #slots do
+        if slots[index] == focus then return true end
+    end
+    return false
+end
+
+-- 只显示「当前选中的那一项」的干燥信息。没有选中就没有信息面板
+-- （v1.5.13.7 起去掉了「干燥信息常显」以及它的模组设置开关）。
+local function drawPanelReadout(slotPanel)
+    local slots = safeIndex(slotPanel, "itemSlots")
+    if type(slots) ~= "table" or #slots == 0 then return end
+
+    -- slotPanel 的 parent 就是那个区域控件（ISWidgetCraftLogicOutputProgress）。
+    local widget = safeIndex(slotPanel, "parent")
+    local logic = safeIndex(widget, "logic")
+    if logic == nil then return end
+
+    if not progressRegionHasFocus(getPlayerNum(slotPanel), widget, slots) then return end
+
+    local index = tonumber(safeIndex(widget, "_gqsRegionIndex")) or 1
+    if index < 1 or index > #slots then
+        -- 选到「全部拿走」：没有信息可显示，只给它描个边，表示当前选的是它。
+        local takeButton = safeIndex(widget, "buttonTake")
+        if type(takeButton) == "table" then
+            local bx, by, bw, bh = slotRect(takeButton)
+            if bw > 0 and bh > 0 then
+                strokeRect(bx - 1, by - 1, bw + 2, bh + 2, 0.95, 0.95, 0.85, 0.45)
+            end
+        end
+        return
+    end
+
+    local slot = slots[index]
+    if safeIndex(slot, "craftRecipeData") == nil then return end
+    local tip = tooltipFor(slot)
+    if tip == nil then return end
+
+    local width, height = measureTooltip(tip, slot, logic)
+    if width <= 0 or height <= 0 then return end
+
+    -- 给选中的格子描边，一眼看出是哪一格。
+    local slotX, slotY, slotW, slotH = slotRect(slot)
+    if slotW > 0 and slotH > 0 then
+        strokeRect(slotX - 1, slotY - 1, slotW + 2, slotH + 2, 0.95, 0.95, 0.85, 0.45)
+    end
+
+    -- 卡片贴着那个格子、从物品格网格底边往下画，再夹进屏幕。
+    local gridY = 0
+    local ok, value = pcall(function() return slotPanel:getAbsoluteY() end)
+    if ok then gridY = tonumber(value) or 0 end
+    gridY = gridY + (tonumber(safeIndex(slotPanel, "height")) or 0) + 4
+
+    local cardWidth = width + CARD_PAD_X * 2
+    local cardHeight = height + CARD_PAD_Y * 2
+    local cardX, cardY = slotX, gridY
+
+    local screenWidth, screenHeight = screenSize()
+    if screenWidth > 0 and cardX + cardWidth > screenWidth - 8 then
+        cardX = math.max(8, screenWidth - 8 - cardWidth)
+    end
+    if screenHeight > 0 and cardY + cardHeight > screenHeight - 8 then
+        cardY = math.max(8, screenHeight - 8 - cardHeight)
+    end
+
+    fillRect(cardX, cardY, cardWidth, cardHeight, 0.82, 0.02, 0.02, 0.02)
+    strokeRect(cardX, cardY, cardWidth, cardHeight, 0.35, 0.55, 0.5, 0.42)
+    paintTooltip(tip, slot, logic, cardX + CARD_PAD_X, cardY + CARD_PAD_Y)
+end
+
+local function drawPendingReadouts()
+    if not isEnabled() then return end
+    for slotPanel in pairs(pending) do
+        pending[slotPanel] = nil
+        pcall(drawPanelReadout, slotPanel)
+    end
+end
+
+-- Only the "in progress" grid inside a CraftLogic panel qualifies: the widget
+-- that owns it exposes it as `.progressItems`, which no other slot panel does.
+local function installSlotReadouts()
+    local slotPanelClass = rawget(_G, "ISItemSlotPanel")
+    if type(slotPanelClass) ~= "table" or type(slotPanelClass.render) ~= "function" then
+        return false
+    end
+    if slotPanelClass._gqsDryingReadout then return true end
+
+    local originalSlotRender = slotPanelClass.render
+    slotPanelClass.render = function(self, ...)
+        if type(originalSlotRender) == "function" then originalSlotRender(self, ...) end
+        local parent = safeIndex(self, "parent")
+        if type(parent) == "table" and safeIndex(parent, "progressItems") == self then
+            -- 只登记，真正绘制留到 OnPostUIDraw：面板 render 里画会被 stencil 裁掉。
+            pending[self] = true
+            liveGrid[self] = true
+        end
+    end
+    slotPanelClass._gqsDryingReadout = true
+
+    if Events and Events.OnPostUIDraw then
+        Events.OnPostUIDraw.Add(drawPendingReadouts)
+    else
+        log("OnPostUIDraw is unavailable; drying readout would be clipped", true)
+    end
+    log("drying progress readout installed")
+    return true
+end
+
+if not installSlotReadouts() then
+    if Events and Events.OnGameStart then
+        Events.OnGameStart.Add(function()
+            if not installSlotReadouts() then
+                log("ISItemSlotPanel was unavailable; drying progress readout inactive", true)
+            end
+        end)
+    end
+end

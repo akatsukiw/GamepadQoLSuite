@@ -160,6 +160,7 @@ if options then
     options:addTitle("UI_GQOS_RightRadialTitle")
     GQS.rightRadialFitnessEnabled = options:addTickBox("rightRadialFitnessEnabled", "UI_GQOS_RightRadialFitnessEnabled", true, "UI_GQOS_RightRadialFitnessEnabled_tooltip")
     GQS.rightRadialSkillsEnabled = options:addTickBox("rightRadialSkillsEnabled", "UI_GQOS_RightRadialSkillsEnabled", true, "UI_GQOS_RightRadialSkillsEnabled_tooltip")
+    GQS.rightRadialQuickClothingEnabled = options:addTickBox("rightRadialQuickClothingEnabled", "UI_GQOS_RightRadialQuickClothingEnabled", true, "UI_GQOS_RightRadialQuickClothingEnabled_tooltip")
     GQS.rightRadialSmashWindowEnabled = options:addTickBox("rightRadialSmashWindowEnabled", "UI_GQOS_RightRadialSmashWindowEnabled", true, "UI_GQOS_RightRadialSmashWindowEnabled_tooltip")
     GQS.rightRadialLightSwitchEnabled = options:addTickBox("rightRadialLightSwitchEnabled", "UI_GQOS_RightRadialLightSwitchEnabled", true, "UI_GQOS_RightRadialLightSwitchEnabled_tooltip")
 
@@ -177,9 +178,11 @@ if options then
     options:addTitle("UI_GQOS_MiscFeaturesTitle")
     GQS.mixedLiquidAutoDrinkEnabled = options:addTickBox("mixedLiquidAutoDrinkEnabled", "UI_GQOS_MixedLiquidAutoDrinkEnabled", true, "UI_GQOS_MixedLiquidAutoDrinkEnabled_tooltip")
     GQS.fishingHoldToStopEnabled = options:addTickBox("fishingHoldToStopEnabled", "UI_GQOS_FishingHoldToStopEnabled", true, "UI_GQOS_FishingHoldToStopEnabled_tooltip")
+    GQS.washHoldToStopEnabled = options:addTickBox("washHoldToStopEnabled", "UI_GQOS_WashHoldToStopEnabled", true, "UI_GQOS_WashHoldToStopEnabled_tooltip")
     GQS.selectWheelPvpOptionEnabled = options:addTickBox("selectWheelPvpOptionEnabled", "UI_GQOS_SelectWheelPvpOptionEnabled", false, "UI_GQOS_SelectWheelPvpOptionEnabled_tooltip")
     GQS.disableSmashWindowBEnabled = options:addTickBox("disableSmashWindowBEnabled", "UI_GQOS_DisableSmashWindowBEnabled", false, "UI_GQOS_DisableSmashWindowBEnabled_tooltip")
     GQS.evolvedNameFixEnabled = options:addTickBox("evolvedNameFixEnabled", "UI_GQOS_EvolvedNameFixEnabled", true, "UI_GQOS_EvolvedNameFixEnabled_tooltip")
+    GQS.flyerJoypadFixEnabled = options:addTickBox("flyerJoypadFixEnabled", "UI_GQOS_FlyerJoypadFixEnabled", true, "UI_GQOS_FlyerJoypadFixEnabled_tooltip")
 end
 
 -- Keep dependent modules that access the historical shared table name working.
