@@ -12,7 +12,7 @@ Fills in the parts of B42's controller support that still feel awkward: multi-it
 |---|---|
 | Game version | Build 42.21.0 (B42 only, not compatible with B41) |
 | Required dependency | [CustomGamepadUI](https://steamcommunity.com/sharedfiles/filedetails/?id=3001154607) |
-| Build version | `1.5.10` |
+| Build version | `1.5.14.1` |
 | Author | Akatsuki_w |
 | Languages | English / Simplified Chinese |
 
@@ -37,7 +37,7 @@ B42's controller support works, but inventory and panel handling still assume a 
 
 | Feature | Default input | Summary |
 |---|---|---|
-| [Multi-selection](#1-multi-selection) | `R3` / `L3` / `L3+R3` | Toggle, range-select, select all or clear |
+| [Multi-selection](#1-multi-selection) | `R3` / `L3` / `L3+R3` / hold `R3` | Toggle, range-select, select all or clear, hold-and-sweep |
 | [Containers and paging](#9-container-layout-paging-and-sorting) | `RT` + Up/Down | Jump 8 items down, or page the whole list |
 | [X quick transfer](#2-x-quick-transfer) | hold `X` in a container | Send selected items to a nearby container (favorites excluded) |
 | [Y panel shortcuts](#3-y-panel-shortcuts) | `Y` + D-pad / left stick | Hold Y + D-pad to open a panel; Y + left stick to switch between panels |
@@ -49,9 +49,13 @@ B42's controller support works, but inventory and panel handling still assume a 
 | [Misc](#11-miscellaneous) | — | Disable B smash-window, map R3 focus |
 | [Info-panel nutrition readout](#12-info-panel-nutrition-readout) | Info panel `Y` | Expand lipids / carbs / protein / calories, independent toggle |
 | [Hold-B to exit fishing](#13-hold-b-to-exit-fishing) | hold `B` while fishing | Closing a panel no longer mis-retracts the rod; shows a progress ring |
-| [Drying-rack and other workstation panels](#14-drying-rack-and-other-workstation-panels) | D-pad / `A` `X` `Y` `L3` `R3` | Full gamepad control of leather / plant drying racks |
+| [Drying-rack and other workstation panels](#14-drying-rack-and-other-workstation-panels) | D-pad / `A` `X` `Y` `L3` `R3` | Full gamepad control of leather / plant drying racks, plus drying readouts |
 | [Recipe sort shortcut](#15-recipe-sort-shortcut) | `L3` | One-key cycle sort in build / craft / drying-rack panels |
 | [Dish-name fix](#16-dish-names-in-non-english-languages) | — | No more `Base.Ramen` in cooked dish names under Chinese and other non-English languages |
+| [Hold-B to stop washing](#17-hold-b-to-stop-washing) | hold `B` while washing | Washing yourself or clothes no longer stops on a stray tap |
+| [Print-media panels in MP](#18-print-media-panels-in-multiplayer) | `B` `X` `Y` | Flyers / newspapers / magazines respond to the pad in MP again, with no error spam |
+| [Smart Radial Menu compatibility](#19-smart-radial-menu-compatibility) | hold Up | This mod's world-object actions merge into SRM's wheel |
+| [Quick Clothing Actions compatibility](#20-quick-clothing-actions-compatibility) | right wheel "Clothing" | Full gamepad control of the clothing wheel |
 
 Every binding can be changed in **Options → Mod Options → Gamepad QoL Suite**.
 
@@ -72,6 +76,11 @@ Every binding can be changed in **Options → Mod Options → Gamepad QoL Suite*
 - Split-screen: the 2nd and later local players now also get a melee target outline (vanilla only draws player 1).
 - Fixes RT+B accidentally closing HUD status indicators (e.g. Modern Status) and hover detail popups.
 - New: info-panel nutrition readout, hold-B fishing exit, drying-rack workstation panel gamepad support, and the non-English dish-name fix — see sections 12–16 below.
+- New: hold-B washing exit, print-media panel fix for multiplayer, and Smart Radial Menu / Quick Clothing Actions compatibility — see sections 17–20 below.
+- The drying-rack panel's drying readouts (progress, time left, temperature, humidity, drying rate) are now a replay of vanilla's own tooltip, laid out as a card grid; in-progress slots are gamepad-selectable.
+- Multi-selection now supports **holding `R3` while pushing the D-pad** to sweep-select a run of rows.
+- With Smart Radial Menu installed, this mod's Up-wheel world-object actions merge into SRM's wheel — one ring, both mods, no duplicates.
+- With Quick Clothing Actions installed, the right D-pad wheel gains a "Clothing" entry and the clothing wheel is fully playable on a pad.
 
 ---
 
@@ -133,6 +142,7 @@ Works in your inventory, containers, and the loot window.
 | Toggle a single row | `R3` (right stick click) | Select/deselect the focused row and mark it as the range anchor |
 | Range select | `L3` (left stick click) | Set the anchor with `R3`, move to the end row, press `L3` to select the whole span |
 | Select all / clear | `L3` + `R3` together | **If anything is selected, it clears first.** Select-all only runs when nothing is selected |
+| Sweep select | hold `R3` and push the D-pad | While held, every row the focus crosses is selected — great for grabbing a dozen loot items in one pass |
 
 ### 2. X quick transfer
 
@@ -203,7 +213,7 @@ The two new entries have independent switches ("Add smash glass to the Up wheel"
 |---|---|
 | Info panel | Press `X` to open the trait detail sidebar; use the D-pad to browse traits grouped into positive / negative / other |
 | Skills panel | Shows a "next level XP" hint on the focused skill; `RT` + Up/Down pages quickly |
-| Building / crafting | `RT` + Up/Down paging, `X` to favorite a recipe, `Y` to show/hide all recipes or building versions |
+| Building / crafting | `RT` + Up/Down paging, `X` to favorite a recipe, `Y` to show/hide all recipes or building versions, `L3` to cycle sort |
 
 ### 8. Fitness panel
 
@@ -272,6 +282,12 @@ Workstations like the leather and plant drying racks use the `CraftLogic` panel,
 
 The top-right of the title bar shows the full button hints; an icon hint also sits to the left of the craft button and to the right of "Take all".
 
+**Drying readouts**: move the focus onto an in-progress slot and that slot's full readout appears — progress, time left, temperature, humidity, drying rate. Those five numbers are drawn by vanilla straight into its own tooltip and are unreadable from Lua (`getDryingFactor()` is private, humidity lives in a private `HashMap`, and reflection is blocked by Kahlua), so this mod **replays vanilla's tooltip verbatim**, paints its own card backing, and arranges the cards in a multi-column grid.
+
+**Gamepad selection**: the D-pad moves between in-progress slots; the focused slot gets a highlighted border and shows only its own readout, while with no focus every slot is drawn.
+
+> Want them always on? The old "always show drying info" toggle was removed — always-on covered the recipe list, and showing it on focus turned out to be far more usable.
+
 ### 15. Recipe sort shortcut
 
 In the build, craft, and drying-rack panels you can press `L3` to cycle the sort mode among "recipe name / most recent / most used" — typing to search recipes on a gamepad is impractical, so sorting is the one that's actually useful.
@@ -287,6 +303,59 @@ This mod overrides the Lua global `getItemEvolvedRecipeName` from `shared/` and 
 - Only affects dishes cooked **after** the change; existing dish names are not rewritten;
 - In multiplayer the name is generated on the server, so **the server must load this mod too**;
 - Mod Options → Miscellaneous → "Fix Base.XXX in dish names", on by default. **Keep it enabled in Chinese.**
+
+### 17. Hold-B to stop washing
+
+Washing yourself, washing clothes, or wringing clothes: in vanilla a single tap of `B` aborts it — one slip and the whole wash is wasted. Worse, `B` is also bound to "cancel action", so pressing B on a panel stops it too.
+
+Now, while washing:
+
+- With gamepad focus on any panel, `B` only closes the panel and **does not interrupt the wash**;
+- With world focus you must **hold `B` for about 500 ms** to abort;
+- On the inventory page, `B` still collapses/expands as vanilla does.
+
+Can be disabled in Mod Options → Other features.
+
+### 18. Print-media panels in multiplayer
+
+Opening a flyer, newspaper, or magazine in multiplayer often leaves the pad **completely dead** — no focus, so paging, flipping to the back, and marking the map all do nothing.
+
+The cause is in vanilla: the first statement of `setJoypadFocus()` is `noise("set focus to %s...", uiToString(control), playerID)`, and `noise()`'s arguments are **evaluated unconditionally**. `uiToString()` reaches `ISAtomUIJoypad:toString()`, which runs `self._ATOM_UI_CLASS.class:getSimpleName()` when the window's `UIName` is empty — `_ATOM_UI_CLASS` is the Java class itself, `.class` doesn't resolve, an exception is thrown, and the whole `setJoypadFocus()` aborts **before** `joypadData.focus = control`, so the focus is never set.
+
+Now:
+
+- `ISAtomUIJoypad.toString` is **reimplemented at runtime** (both the class definition and the copy `Apply()` puts on the window object), returning `<AtomUI>` for an empty `UIName` so the throwing line never runs;
+- When a print-media window opens, the controller binding and focus are **re-applied as a fallback**, so it works even if vanilla's binding failed;
+- `B` closes, `X` flips the newspaper text, `Y` marks the map and closes — all fine.
+
+> A `pcall` wrapper does **not** work here: Kahlua prints the `ERROR` and dumps the stack at the moment the exception is thrown, and `pcall` only stops it from propagating — the log line is already written. The only fix is to never execute that line.
+
+### 19. Smart Radial Menu compatibility
+
+[Smart Radial Menu](https://steamcommunity.com/sharedfiles/filedetails/?id=3494108029) (SRM) defaults to showing its own wheel **only when the vanilla wheel is empty**. This mod used to add entries to the vanilla Up-D-pad wheel, which filled it up — so installing SRM made SRM itself disappear.
+
+Now:
+
+- When SRM is detected, holding **Up opens SRM's wheel directly** instead of the vanilla wheel;
+- This mod's **world-object actions** (smash glass, light switch, drop worn backpack, open/close curtains, remove broken glass, drink, fill, reinforce) are **appended to SRM's wheel**, so one ring holds both SRM's item actions and this mod's actions;
+- The scan covers the **full 3×3** (including the current tile and the tile in front), so curtains and windows right in front of you are recognised;
+- Closing SRM's wheel with `RT+B` no longer locks it — it reopens normally.
+
+Each action's own toggle (smash glass / light switch) still applies. **Without SRM installed, behaviour is completely unchanged** — every SRM-related branch is guarded by an "SRM present" check.
+
+### 20. Quick Clothing Actions compatibility
+
+[Quick Clothing Actions](https://steamcommunity.com/sharedfiles/filedetails/?id=3790742081) (QCA) is a clothing wheel, but it only listens for the keyboard (default `G`) and never sets gamepad focus, so the pad does nothing.
+
+Now:
+
+- The **right D-pad wheel** gains a "**Clothing**" entry (using the inventory T-shirt icon), toggleable in Mod Options;
+- It opens QCA's clothing wheel: **right stick** picks a garment → `A` enters the sub-wheel → pick wear / remove / extra action → confirm;
+- **Confirm** works with `A` / `R3` / D-pad Up / D-pad Right (`ISRadialMenu` locates the current slice from the stick direction, so `A` alone often finds no target);
+- `B` / `X` go back from the sub-wheel to the garment list; the top level closes;
+- Closing it with `RT+B` no longer locks it.
+
+> Known limitation: QCA itself hardcodes `getSpecificPlayer(0)` when gathering items, so **split-screen player 2** sees player 1's clothing. Single-player and multiplayer (both player 0) are unaffected.
 
 ---
 
@@ -326,15 +395,20 @@ Include your game version, mod version, reproduction steps, and the relevant lin
 
 - **Game version**: Build 42.21.0. Other versions untested
 - **Required**: CustomGamepadUI (Workshop 3001154607)
+- **Verified compatible**:
+  - [Smart Radial Menu](https://steamcommunity.com/sharedfiles/filedetails/?id=3494108029) — this mod yields the Up wheel and merges its world-object actions into SRM's wheel, see [section 19](#19-smart-radial-menu-compatibility)
+  - [Quick Clothing Actions](https://steamcommunity.com/sharedfiles/filedetails/?id=3790742081) — "Clothing" entry in the right wheel with full gamepad support, see [section 20](#20-quick-clothing-actions-compatibility)
 - **Not recommended alongside**: other mods that rewrite inventory layout, selection state, or item transfer (duplicate key interception)
-- **Multiplayer**: includes one server-side module (liquid-type sync for mixed-liquid auto-drink); both client and server need the mod
-- **Never modified**: vanilla Lua, CustomGamepadUI's Workshop files, CleanUI
+- **Multiplayer**: includes one server-side module (liquid-type sync for mixed-liquid auto-drink); both client and server need the mod. The print-media fix is client-only and runs on each client
+- **Never modified**: vanilla Lua, CustomGamepadUI's Workshop files, CleanUI, Smart Radial Menu, Quick Clothing Actions
 
 ## Known limitations
 
 - Broken-window names occasionally fail to display
 - Recognition of external mixed-liquid water sources has not been fully tested
 - Up-wheel entries depend on nearby targets; not appearing in open areas is expected
+- With Smart Radial Menu installed the vanilla Up wheel no longer appears (SRM only shows its own wheel when the vanilla one is empty — that is its design)
+- Quick Clothing Actions' wheel reads player 1's clothing on **split-screen player 2** (QCA hardcodes `getSpecificPlayer(0)`; single-player and multiplayer are unaffected)
 
 ---
 
