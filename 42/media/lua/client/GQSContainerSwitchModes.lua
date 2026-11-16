@@ -76,6 +76,37 @@ local function isVerticalDpadPressed(joypadId)
     return false
 end
 
+-- Any D-pad direction (not just Up/Down) proves the shoulder is being held as
+-- a chord modifier. Vanilla mode 3 uses LB/RB + Left/Right to move focus, and
+-- other mods (Icons Inventory) add their own shoulder chords on top of that.
+local function isAnyDpadPressed(joypadId)
+    if type(joypadId) ~= "number" or joypadId < 0 then return false end
+
+    local names = { "DPadUp", "DPadDown", "DPadLeft", "DPadRight" }
+    local buttons = rawget(_G, "JoypadButton")
+    if buttons then
+        for i = 1, #names do
+            local button = buttons[names[i]]
+            if button and type(button.isDown) == "function" then
+                local ok, down = pcall(button.isDown, button, joypadId)
+                if ok and down == true then return true end
+            end
+        end
+    end
+
+    local joypad = rawget(_G, "Joypad")
+    if type(isJoypadPressed) == "function" and joypad then
+        for i = 1, #names do
+            local button = joypad[names[i]]
+            if button ~= nil then
+                local ok, down = pcall(isJoypadPressed, joypadId, button)
+                if ok and down == true then return true end
+            end
+        end
+    end
+    return false
+end
+
 local function isShoulderDirectionSwitchModeActive()
     local mode = getShoulderSwitchMode()
     -- In the vanilla accessibility modes 2 and 3, L1/R1 + Up/Down switches
@@ -118,6 +149,16 @@ local function queueTap(page, side, dpadWasAlreadyDown)
     local playerIndex = page.player
     local joypadId = getJoypadId(playerIndex)
     if joypadId < 0 then return end
+
+    -- Ignore replayed shoulder events. Overhaul mods (Icons Inventory) swallow the
+    -- real press and then call the captured onJoypadDown again from update() once
+    -- the shoulder is already released. Treating that replay as a fresh press
+    -- would cycle a container right after the player released the shoulder.
+    if not isShoulderPressed(joypadId, side == "left") then
+        debugPrint(string.format("Ignored replayed %s event: shoulder already released (player=%s)",
+            side == "left" and "L1/LB" or "R1/RB", tostring(playerIndex)))
+        return
+    end
 
     local playerPending = pendingTaps[playerIndex]
     if not playerPending then
@@ -177,7 +218,16 @@ local function processPendingTaps()
         for side, tap in pairs(playerPending) do
             if not isComboModeActive() then
                 playerPending[side] = nil
-            elseif not isShoulderPressed(tap.joypadId, side == "left") then
+            elseif isShoulderPressed(tap.joypadId, side == "left") then
+                -- Still held: poll for any D-pad direction. Left/Right counts as
+                -- a chord too (vanilla mode 3 moves focus with it, Icons Inventory
+                -- switches panes with it), so a release must not tap-cycle.
+                if not tap.usedAsModifier and isAnyDpadPressed(tap.joypadId) then
+                    tap.usedAsModifier = true
+                    debugPrint(string.format("%s used with a D-pad direction; release will not cycle (player=%s)",
+                        side == "left" and "L1/LB" or "R1/RB", tostring(playerIndex)))
+                end
+            else
                 -- A tap is processed on release. If Up/Down was pressed while the
                 -- shoulder was held, the regular mode-3 handler already switched it.
                 playerPending[side] = nil

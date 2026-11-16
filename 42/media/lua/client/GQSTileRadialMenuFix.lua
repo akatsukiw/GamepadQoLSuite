@@ -820,6 +820,12 @@ local function install()
         dpadWheels.onDisplayUp = function(joypadData, ...)
             local playerIndex = joypadData and joypadData.player
             local player = playerIndex ~= nil and type(getSpecificPlayer) == "function" and getSpecificPlayer(playerIndex) or nil
+            -- CustomGamepadUI's "Tile Radial Menu" tick box is the master switch
+            -- for the whole D-pad Up extension. When it is off we must stay
+            -- completely out of the way: no CGUI wheel, no GQS neighbour slices,
+            -- and no GQS actions appended to a Smart Radial Menu wheel. Let the
+            -- upstream chain (and SRM, if installed) decide by themselves.
+            -- The vanilla vehicle/animal wheel is never touched by us here.
             local option = GQS.tileRadialMenu
             local enabled = option and type(option.getValue) == "function" and option:getValue() == true
             local hasNativeContext = false
@@ -835,17 +841,77 @@ local function install()
                     hasNativeContext = animalOk and target ~= nil
                 end
             end
-            -- Smart Radial compatibility: when SRM is active and there is no
-            -- vehicle/animal context, open the SRM wheel directly and append our
-            -- contextual slices to it. SRM only shows its own wheel when the
-            -- vanilla wheel is empty, and CGUI always fills the vanilla wheel,
-            -- so bypass it entirely.
+            -- Smart Radial compatibility: delegate the priority decision to
+            -- SRM's own onDisplayUp wrapper so "Show SRM after vanilla menu"
+            -- is honoured. The previous version opened the SRM wheel here and
+            -- returned immediately, which skipped SRM, CustomGamepadUI and the
+            -- vanilla handler entirely: a vehicle/animal wheel could never win
+            -- the D-pad Up press. Now we run the whole chain first, read back
+            -- the result, and only append our contextual slices afterwards.
+            --
+            -- The upstream "Tile Radial Menu" option gates this whole branch.
+            -- Before v1.5.14.4 the SRM branch ignored it and appended our
+            -- actions unconditionally, so toggling the option had no visible
+            -- effect whenever Smart Radial Menu was installed. With the option
+            -- off we skip the branch entirely and fall through to the plain
+            -- upstream call below: no CGUI wheel, no GQS slices, no suppressed
+            -- wheel, and SRM (if loaded) keeps its own behaviour untouched.
             local srm = rawget(_G, "SRMRadialMenu")
-            if srm and not hasNativeContext and player then
+            if srm and enabled and player then
                 local playerNum = playerIndex or 0
                 if type(srm.hasSwappedMenu) == "table" then srm.hasSwappedMenu[playerNum] = false end
-                local okShow, errShow = pcall(function() srm.showRadialMenu(player) end)
+
+                -- Make isEmpty() describe THIS press. The vanilla handler
+                -- clears the wheel as its first step, but when SRM takes
+                -- priority that handler never runs, so stale slices from the
+                -- previous session could look like a freshly opened menu.
+                if type(getPlayerRadialMenu) == "function" then
+                    pcall(function()
+                        local wheel = getPlayerRadialMenu(playerNum)
+                        if wheel then wheel:clear() end
+                    end)
+                end
+
+                -- suppressCustomWheel stops CustomGamepadUI from filling the
+                -- vanilla wheel with its own slices: that would make SRM think
+                -- vanilla claimed the press even with no vehicle nearby.
+                -- SRMRadialMenu.showRadialMenu is a different function and is
+                -- deliberately NOT affected by this flag.
+                local previous = suppressCustomWheel
+                suppressCustomWheel = true
+                local okCall, callResult = pcall(originalOnDisplayUp, joypadData, ...)
+                suppressCustomWheel = previous
+                if not okCall then error(callResult) end
+
+                -- Read back instead of guessing. A non-empty vanilla wheel
+                -- means the vehicle/animal menu won: leave it alone and do not
+                -- touch the SRM wheel at all.
+                local vanillaClaimed = false
+                if type(getPlayerRadialMenu) == "function" then
+                    local okWheel, wheel = pcall(getPlayerRadialMenu, playerNum)
+                    if okWheel and wheel then
+                        local okEmpty, empty = pcall(function() return wheel:isEmpty() end)
+                        vanillaClaimed = okEmpty and empty == false
+                    end
+                end
+                if vanillaClaimed then
+                    srmLog("SRM: vanilla vehicle/animal wheel kept priority")
+                    return callResult
+                end
+
+                -- Vanilla wheel is empty, so SRM should have opened its root
+                -- menu. Fall back to opening it directly if we happen to sit
+                -- inside SRM's wrapper (another mod re-wrapping after us).
                 local srmMenu = srm.SRMRootMenu and srm.SRMRootMenu[playerNum]
+                if not srmMenu then
+                    local okShow, errShow = pcall(function() srm.showRadialMenu(player) end)
+                    if not okShow then
+                        srmLog("SRM showRadialMenu failed: " .. tostring(errShow))
+                        return callResult
+                    end
+                    srmMenu = srm.SRMRootMenu and srm.SRMRootMenu[playerNum]
+                end
+
                 local added = false
                 if srmMenu then
                     srmMenu.isFromOtherMenu = false
@@ -865,16 +931,9 @@ local function install()
                     if added then pcall(function() srmMenu:center() end) end
                     if not okAdd then srmLog("SRM append failed: " .. tostring(addResult)) end
                 end
-                local hasContent = false
-                if srmMenu then
-                    local okEmpty, empty = pcall(function() return srmMenu:isEmpty() end)
-                    hasContent = okEmpty and empty == false
-                end
-                srmLog("SRM branch: show=" .. tostring(okShow) .. " menu=" .. tostring(srmMenu ~= nil)
-                    .. " added=" .. tostring(added) .. " hasContent=" .. tostring(hasContent))
-                if okShow and hasContent then return end
-                if not okShow then srmLog("SRM showRadialMenu failed: " .. tostring(errShow)) end
-                -- SRM had nothing to show; fall through to the vanilla wheel.
+                srmLog("SRM branch: delegated=" .. tostring(okCall) .. " menu="
+                    .. tostring(srmMenu ~= nil) .. " added=" .. tostring(added))
+                return callResult
             end
 
             if not hasNativeContext then return originalOnDisplayUp(joypadData, ...) end

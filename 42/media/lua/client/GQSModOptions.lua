@@ -183,6 +183,9 @@ if options then
     GQS.disableSmashWindowBEnabled = options:addTickBox("disableSmashWindowBEnabled", "UI_GQOS_DisableSmashWindowBEnabled", false, "UI_GQOS_DisableSmashWindowBEnabled_tooltip")
     GQS.evolvedNameFixEnabled = options:addTickBox("evolvedNameFixEnabled", "UI_GQOS_EvolvedNameFixEnabled", true, "UI_GQOS_EvolvedNameFixEnabled_tooltip")
     GQS.flyerJoypadFixEnabled = options:addTickBox("flyerJoypadFixEnabled", "UI_GQOS_FlyerJoypadFixEnabled", true, "UI_GQOS_FlyerJoypadFixEnabled_tooltip")
+    -- Off by default: B42.22.2 fixed furniture rotation upstream, so this fix
+    -- is only needed on B42.21 and older.
+    GQS.furnitureRotateFixEnabled = options:addTickBox("furnitureRotateFixEnabled", "UI_GQOS_FurnitureRotateFixEnabled", false, "UI_GQOS_FurnitureRotateFixEnabled_tooltip")
 end
 
 -- Keep dependent modules that access the historical shared table name working.

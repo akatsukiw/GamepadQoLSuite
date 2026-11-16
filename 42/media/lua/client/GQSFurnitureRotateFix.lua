@@ -36,10 +36,26 @@
 -- driving, and re-apply the chosen facing on duplicate confirm calls. Mannequins
 -- (canRotateDirection) keep their vanilla path untouched.
 --
+-- OPT-IN: gated by the "Fix gamepad furniture rotation" option, which is off by
+-- default because B42.22.2 fixed the same problems upstream. With the option off
+-- every hook passes straight through to the original function, so furniture
+-- rotation runs on untouched vanilla logic. The option is read on every call, so
+-- toggling it in Mod Options takes effect immediately without a reload.
+--
 -- Client-side only; no vanilla file is modified.
+
+local GQS = require("GQSModOptions")
 
 local GQSFurnitureRotateFix = {}
 local installed = false
+
+local function featureEnabled()
+    local option = GQS and GQS.furnitureRotateFixEnabled
+    if not option or type(option.getValue) ~= "function" then return false end
+    local ok, value = pcall(option.getValue, option)
+    if not ok then return false end
+    return value == true or value == 1
+end
 
 -- Same order as ISMoveableSpriteProps:getIndexedFaces().
 local FACE_ORDER = { "N", "W", "S", "E" }
@@ -239,6 +255,9 @@ local function installActionDirectionFix()
 
     local originalNew = ISMoveablesAction.new
     ISMoveablesAction.new = function(self, character, square, mode, origSpriteName, object, direction, item, moveCursor)
+        if not featureEnabled() then
+            return originalNew(self, character, square, mode, origSpriteName, object, direction, item, moveCursor)
+        end
         if moveCursor and (mode == "place" or mode == "rotate") then
             local index = tonumber(moveCursor.cursorFacing) or tonumber(moveCursor.joypadFacing)
             if index and index >= 1 and index <= 4 then
@@ -285,6 +304,7 @@ local function installHooks()
     local originalRotateWhilePlacing = ISMoveableCursor.rotateWhilePlacing
     if type(originalRotateWhilePlacing) == "function" then
         ISMoveableCursor.rotateWhilePlacing = function(self)
+            if not featureEnabled() then return originalRotateWhilePlacing(self) end
             if self and self.objectListCache then
                 local entry = self.objectListCache[self.objectIndex]
                 local moveProps = entry and entry.moveProps
@@ -301,6 +321,7 @@ local function installHooks()
     local originalRotateKey = ISMoveableCursor.rotateKey
     if type(originalRotateKey) == "function" then
         ISMoveableCursor.rotateKey = function(self, key, joypadTriggered)
+            if not featureEnabled() then return originalRotateKey(self, key, joypadTriggered) end
             if joypadTriggered and self and currentMode(self) == "rotate" then
                 local rotateObject = self.objectListCache
                 if not rotateObject and type(self.getRotateableObject) == "function" then
@@ -325,6 +346,7 @@ local function installHooks()
     if type(originalRotateMouse) == "function" then
         ISMoveableCursor.rotateMouse = function(self, x, y)
             if not self then return end
+            if not featureEnabled() then return originalRotateMouse(self, x, y) end
 
             if isJoypadDriving() then
                 if self.cursorFacing ~= nil then
@@ -352,6 +374,7 @@ local function installHooks()
     local originalCreate = ISMoveableCursor.create
     if type(originalCreate) == "function" then
         ISMoveableCursor.create = function(self, x, y, z, north, sprite)
+            if not featureEnabled() then return originalCreate(self, x, y, z, north, sprite) end
             if self then
                 local mode = currentMode(self)
 

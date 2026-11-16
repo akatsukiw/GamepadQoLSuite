@@ -731,28 +731,36 @@ local function wrapDirections(pageClass)
         onJoypadDirRight = "right",
     }
     for methodName, direction in pairs(directions) do
-        local oldMethod = pageClass[methodName]
-        if type(oldMethod) == "function" and not pageClass["_gqolXWrapped_" .. methodName] then
-            pageClass[methodName] = function(self, ...)
+        local current = pageClass[methodName]
+        local wrapperKey = "_gqolXDirWrapper_" .. methodName
+        -- Compare against the wrapper we installed last time instead of using a
+        -- one-shot boolean. Overhaul mods (Icons Inventory) replace these methods
+        -- at load time, which would otherwise leave our wrapper buried inside
+        -- theirs and break long-X target selection completely.
+        if type(current) == "function" and pageClass[wrapperKey] ~= current then
+            local wrapper = function(self, ...)
                 local state = pendingX[tonumber(self.player) or 0]
                 if state and state.longPress then
                     handleDirection(state, direction)
                     return true
                 end
-                return oldMethod(self, ...)
+                return current(self, ...)
             end
-            pageClass["_gqolXWrapped_" .. methodName] = true
+            pageClass[methodName] = wrapper
+            pageClass[wrapperKey] = wrapper
         end
     end
 end
 
 local function wrapPageClass(pageClass)
-    if type(pageClass) ~= "table" or hookedPages[pageClass] then return end
+    if type(pageClass) ~= "table" then return end
     local oldJoypadDown = pageClass.onJoypadDown
     if type(oldJoypadDown) ~= "function" then return end
-    hookedPages[pageClass] = true
+    -- Same reference check as wrapDirections: re-wrap whenever another mod has
+    -- replaced onJoypadDown after us, so the X press is always observed first.
+    if pageClass._gqolXDownWrapper == oldJoypadDown then return end
 
-    pageClass.onJoypadDown = function(self, button, ...)
+    local wrapper = function(self, button, ...)
         local joypad = rawget(_G, "Joypad")
         local playerIndex = tonumber(self.player) or 0
         if xTransferEnabled() and joypad and button == joypad.XButton and not (JoypadState and JoypadState.disableGrab) then
@@ -784,6 +792,10 @@ local function wrapPageClass(pageClass)
         end
         return oldJoypadDown(self, button, ...)
     end
+
+    pageClass.onJoypadDown = wrapper
+    pageClass._gqolXDownWrapper = wrapper
+    hookedPages[pageClass] = true
 
     wrapDirections(pageClass)
 end
