@@ -119,6 +119,49 @@ local function writeExercisePreference(playerNum, exerciseId)
     end))
 end
 
+-- ---------------------------------------------------------------------------
+-- Remembered exercise duration
+-- ---------------------------------------------------------------------------
+-- Same local-file approach as the remembered exercise (see above): it survives
+-- multiplayer logins where player ModData is server-owned. Kept in a separate
+-- file so the exercise-selection path stays untouched.
+local durationCache = {}
+
+local function durationFileName(playerNum)
+    return "GQSFitnessLastDuration_" .. tostring(playerNum + 1) .. ".txt"
+end
+
+local function readDurationPreference(playerNum)
+    if type(getFileReader) ~= "function" then return nil end
+    local ok, reader = pcall(getFileReader, durationFileName(playerNum), false)
+    if not ok or reader == nil then return nil end
+
+    local value = nil
+    pcall(function()
+        local line = reader:readLine()
+        if line ~= nil then value = tostring(line) end
+        reader:close()
+    end)
+    if value == nil then return nil end
+
+    value = string.gsub(value, "^%s*(.-)%s*$", "%1")
+    local minutes = tonumber(value)
+    -- Vanilla only accepts 10..60 in 10-minute steps; reject anything else so a
+    -- corrupt file can never feed a bad duration into ISFitnessAction.
+    if not minutes or minutes < 10 or minutes > 60 then return nil end
+    return tostring(math.floor(minutes))
+end
+
+local function writeDurationPreference(playerNum, minutes)
+    if type(getFileWriter) ~= "function" then return false end
+    local ok, writer = pcall(getFileWriter, durationFileName(playerNum), true, false)
+    if not ok or writer == nil then return false end
+    return (pcall(function()
+        writer:writeln(tostring(minutes))
+        writer:close()
+    end))
+end
+
 local function getLocalPlayerNum(self)
     if type(self.playerNum) == "number" then return self.playerNum end
     local player = self.player
@@ -209,9 +252,18 @@ local function selectPreferredExercise(self)
     return false
 end
 
--- Duration pre-filled into the vanilla time field. Read on every panel open so a
--- change in Mod Options applies without reloading.
-local function getDefaultDuration()
+-- Duration pre-filled into the vanilla time field. A duration the player
+-- actually started is remembered per local player; the Mod Options slider is
+-- only the default for the first run or when the remembered value is missing
+-- or invalid. Read on every panel open so either change takes effect.
+local function getDefaultDuration(playerNum)
+    if playerNum ~= nil then
+        local remembered = durationCache[playerNum + 1] or readDurationPreference(playerNum)
+        if remembered then
+            durationCache[playerNum + 1] = remembered
+            return remembered
+        end
+    end
     local options = rawget(_G, "GamepadQoLSuiteOptions")
     local option = options and options.fitnessDefaultDuration
     if option and type(option.getValue) == "function" then
@@ -225,7 +277,29 @@ end
 
 local function setDefaultDuration(self)
     if self.exeTime and type(self.exeTime.setText) == "function" then
-        pcall(self.exeTime.setText, self.exeTime, getDefaultDuration())
+        pcall(self.exeTime.setText, self.exeTime, getDefaultDuration(getLocalPlayerNum(self)))
+    end
+end
+
+-- Called from the OK/X wrapper only after the vanilla start path has run, so a
+-- duration is remembered only when the player actually started a workout.
+local function rememberDuration(self)
+    if not isEnhancementEnabled() then return end
+    local playerNum = getLocalPlayerNum(self)
+    if playerNum == nil or not self.exeTime then return end
+
+    local ok, value = pcall(function() return self.exeTime:getInternalText() end)
+    if not ok or value == nil then return end
+    local minutes = tonumber(value)
+    if not minutes or minutes < 10 or minutes > 60 then return end
+    minutes = math.floor(minutes)
+
+    if durationCache[playerNum + 1] == tostring(minutes) then return end
+    if writeDurationPreference(playerNum, minutes) then
+        durationCache[playerNum + 1] = tostring(minutes)
+        fitnessLog("remembered workout duration '" .. tostring(minutes) .. "' for player " .. tostring(playerNum + 1))
+    else
+        fitnessLog("could not persist workout duration for player " .. tostring(playerNum + 1), true)
     end
 end
 
@@ -515,6 +589,19 @@ if type(originalClickedExe) == "function" then
     FitnessUI.clickedExe = function(self, buttons, index)
         local result = originalClickedExe(self, buttons, index)
         pcall(rememberExercise, self)
+        return result
+    end
+end
+
+-- All confirmed starts (mouse OK and joypad X via ok.forceClick) funnel through
+-- ISFitnessUI:onClick with button.internal == "OK". Remember the duration there,
+-- mirroring how clickedExe remembers the exercise choice.
+local originalOnClick = FitnessUI.onClick
+if type(originalOnClick) == "function" then
+    FitnessUI.onClick = function(self, button, ...)
+        local isOk = type(button) == "table" and button.internal == "OK"
+        local result = originalOnClick(self, button, ...)
+        if isOk then pcall(rememberDuration, self) end
         return result
     end
 end

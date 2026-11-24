@@ -453,10 +453,12 @@ local function runDeferredNativeY(state)
     local original = nil
     local originalFocus = nil
     local originalButton = Joypad and Joypad.YButton or nil
+    local originalJoypadData = nil
     if pending and type(pending.original) == "function" and pending.focus ~= nil then
         original = pending.original
         originalFocus = pending.focus
         originalButton = pending.button or originalButton
+        originalJoypadData = pending.joypadData
     elseif baseline and type(baseline._gqsPanelQuickSelectOriginalDown) == "function" then
         original = baseline._gqsPanelQuickSelectOriginalDown
         originalFocus = baseline
@@ -466,7 +468,15 @@ local function runDeferredNativeY(state)
     end
 
     if type(original) == "function" and originalFocus ~= nil then
-        local ok, err = pcall(original, originalFocus, originalButton)
+        -- Native onJoypadDown handlers take (self, button, joypadData). Passing
+        -- only two arguments leaves joypadData nil for wrappers such as SRM's
+        -- ISRadialMenu.onJoypadDown, which reads joypadData.player.
+        local ok, err
+        if originalJoypadData ~= nil then
+            ok, err = pcall(original, originalFocus, originalButton, originalJoypadData)
+        else
+            ok, err = pcall(original, originalFocus, originalButton)
+        end
         if ok then
             log("replayed original native Y handler for " .. tostring(getTypeName(originalFocus) ~= "" and getTypeName(originalFocus) or originalFocus.Type or originalFocus.type or originalFocus.name or "focused UI"))
         else
@@ -1655,7 +1665,12 @@ local function hookFocusObject(focus, playerNum)
                     end
                     local currentState = stateFor(playerNum)
                     if currentState.pendingY == nil then
-                        currentState.pendingY = { focus = self, original = originalDown, button = button }
+                        -- Keep the joypadData that came with this Y event. The
+                        -- deferred replay must pass it as the third argument,
+                        -- otherwise handlers that read joypadData.player (e.g.
+                        -- the Smart Radial Menu ISRadialMenu hook) throw
+                        -- "attempted index: player of non-table: null".
+                        currentState.pendingY = { focus = self, original = originalDown, button = button, joypadData = ... }
                         currentState.dpadDownAtYEvent = isAnyDpadDown(getControllerId(playerNum))
                         log("captured Y-down order: D-pad already down=" .. tostring(currentState.dpadDownAtYEvent))
                     end

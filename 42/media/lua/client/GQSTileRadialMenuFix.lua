@@ -4,6 +4,12 @@ local GQS = require("GQSModOptions")
 local installed = false
 local suppressCustomWheel = false
 
+-- The D-pad Up wheel shows at most this many water sources: the player's own
+-- square first, then the forward 180-degree arc. Squares behind the player are
+-- never offered. Keep it small: every source adds a drink + fill pair to the
+-- wheel and too many sources crowd out the other actions.
+local MAX_WATER_SOURCES = 2
+
 local function debugLog(message)
     local logger = rawget(_G, "GQSLog")
     if logger and type(logger.log) == "function" then
@@ -51,6 +57,16 @@ end
 local function objectHasWater(object)
     if not object then return false end
     local ok, value = pcall(function() return object:hasWater() end)
+    return ok and value == true
+end
+
+-- Rain/blood-contaminated water is still drinkable in vanilla but is a poor
+-- default choice. Sort it behind clean sources so clean ones take the limited
+-- radial slots first. If a source cannot be queried, treat it as clean so we
+-- never hide a usable source on a build that lacks this method.
+local function objectWaterIsTainted(object)
+    if not object then return false end
+    local ok, value = pcall(function() return object:isTaintedWater() end)
     return ok and value == true
 end
 
@@ -126,6 +142,103 @@ local function getWaterContainerTexture(item)
         return item:getIcon()
     end)
     if iconOk and texture then return texture end
+    return nil
+end
+
+-- Icon for a world object, using the same sprite source vanilla uses for its
+-- X-interaction entries (getTexture(spriteName):splitIcon()). Only used for
+-- Generic world-object sprite icon (fallback for radio and other actions).
+-- texture:getWidth() is unavailable in this Kahlua build, so no size filter.
+local function getObjectIcon(object, fallback)
+    if not object then return fallback end
+
+    local nameOk, spriteName = pcall(function() return object:getSpriteName() end)
+    if nameOk and type(spriteName) == "string" and spriteName ~= "" then
+        local texOk, texture = pcall(getTexture, spriteName)
+        if texOk and texture then
+            local splitOk, icon = pcall(function() return texture:splitIcon() end)
+            if splitOk and icon then return icon end
+            return texture
+        end
+    end
+
+    -- Some objects only expose the sprite object, not getSpriteName().
+    local spriteOk, sprite = pcall(function() return object:getSprite() end)
+    if spriteOk and sprite then
+        local spriteNameOk, name = pcall(function() return sprite:getName() end)
+        if spriteNameOk and type(name) == "string" and name ~= "" then
+            local texOk, texture = pcall(getTexture, name)
+            if texOk and texture then
+                local splitOk, icon = pcall(function() return texture:splitIcon() end)
+                if splitOk and icon then return icon end
+                return texture
+            end
+        end
+    end
+    return fallback
+end
+
+-- World TV/radio object -> the item icon shown in the inventory (the one in
+-- the player's bag), using the same lookup as vanilla ISRadioAndTvMenu:
+--   1) built-in set: object properties "CustomItem" -> getItem():getNormalTexture()
+--   2) player-dropped: mod data RadioItemID -> matching world item -> getTex()
+-- Falls back to the object's sprite icon (getObjectIcon), then the bulb icon.
+-- Every Java call is pcall-guarded for Kahlua.
+local function getRadioIcon(object, fallback)
+    if not object then return fallback end
+
+    -- 1) Built-in TV/radio: CustomItem property names the inventory item script.
+    local propsOk, props = pcall(function() return object:getProperties() end)
+    if propsOk and props then
+        local customOk, customItem = pcall(function() return props:get("CustomItem") end)
+        if customOk and type(customItem) == "string" and customItem ~= "" then
+            local scriptOk, script = pcall(getItem, customItem)
+            if scriptOk and script then
+                local texOk, texture = pcall(function() return script:getNormalTexture() end)
+                if texOk and texture then return texture end
+            end
+        end
+    end
+
+    -- 2) Player-dropped item: RadioItemID links the invisible IsoWaveSignal to
+    --    a world item whose getTex() is the inventory icon in the screenshot.
+    local dataOk, modData = pcall(function() return object:getModData() end)
+    if dataOk and modData then
+        local idOk, radioId = pcall(function() return modData.RadioItemID end)
+        if idOk and type(radioId) == "number" then
+            local squareOk, square = pcall(function() return object:getSquare() end)
+            if squareOk and square then
+                local objsOk, objs = pcall(function() return square:getWorldObjects() end)
+                if objsOk and objs then
+                    local sizeOk, count = pcall(function() return objs:size() end)
+                    if sizeOk then
+                        for i = 1, count do
+                            local itemOk, worldItem = pcall(function() return objs:get(i - 1) end)
+                            if itemOk and worldItem then
+                                local innerOk, inner = pcall(function() return worldItem:getItem() end)
+                                if innerOk and inner then
+                                    local innerIdOk, innerId = pcall(function() return inner:getID() end)
+                                    if innerIdOk and innerId == radioId then
+                                        local texOk, texture = pcall(function() return inner:getTex() end)
+                                        if texOk and texture then return texture end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return getObjectIcon(object, fallback)
+end
+
+-- Curtains use CGUI's plain cloth icon (32x32, fixed size). The entity sprite
+-- was far too big for a wheel slice; a fixed icon is safe and readable.
+local CURTAIN_ICON = "media/ui/icon_sheet.png"
+local function getCurtainIcon()
+    local ok, texture = pcall(getTexture, CURTAIN_ICON)
+    if ok and texture then return texture end
     return nil
 end
 
@@ -538,6 +651,12 @@ end
 local function registerBuiltInLightSwitchProvider()
     GQSTileRadialMenuFix.registerProvider("gqs.light-switch", function(context)
         if not optionEnabled("rightRadialLightSwitchEnabled", true) then return false end
+        -- Show every usable switch in scan order (nearest first). A wall can
+        -- hold a switch on each face; listing them all lets the player pick
+        -- the side they actually want instead of the wheel silently choosing
+        -- one. makeObjectActionLabel appends each switch's own name so the
+        -- slices stay distinguishable.
+        local added = false
         for _, entry in ipairs(context.objects) do
             local light = entry.object
             if instanceof(light, "IsoLightSwitch") then
@@ -548,13 +667,14 @@ local function registerBuiltInLightSwitchProvider()
                     if activeOk then
                         local labelKey = active and "ContextMenu_Turn_Off" or "ContextMenu_Turn_On"
                         local label = makeObjectActionLabel(getText(labelKey), light, "light")
-                        context:addSlice(label, getTexture("media/ui/icon_light_bulb.png"), onToggleNearbyLight, light, context.player)
-                        return true -- only present the nearest usable switch
+                        if context:addSlice(label, getTexture("media/ui/icon_light_bulb.png"), onToggleNearbyLight, light, context.player) then
+                            added = true
+                        end
                     end
                 end
             end
         end
-        return false
+        return added
     end, 20)
 end
 
@@ -601,61 +721,151 @@ local function addNeighborSlices(player, menu, includeFront)
     local front = square:getAdjacentSquare(player:getDir())
     local cell = getCell()
     local found, added, seenSquare = {}, false, {}
+
+    -- Visit the 3x3 ring in numpad-style priority order, NOT raw dx/dy order:
+    --   5 (self) -> 8 (facing) -> 7/9 (forward diagonals)
+    --   -> 4/6 (direct left/right) -> 1/2/3 (behind)
+    -- All nine squares are scanned; squares behind the player only lose
+    -- priority (and are excluded from water selection) but still show actions.
+    -- Facing is derived from the front square's offset, so this does not depend
+    -- on any direction-index constant (safer under Kahlua).
+    local facingX = 0
+    local facingY = 0
+    if front then
+        local okFX, fx = pcall(function() return front:getX() - square:getX() end)
+        local okFY, fy = pcall(function() return front:getY() - square:getY() end)
+        if okFX and okFY then facingX, facingY = fx, fy end
+    end
+    local function isForward(dx, dy)
+        return (dx * facingX + dy * facingY) > 0
+    end
+    local squareRecords = {}
     for dx = -1, 1 do
         for dy = -1, 1 do
-            if includeFront or dx ~= 0 or dy ~= 0 then
-                local nearby = cell:getGridSquare(square:getX() + dx, square:getY() + dy, square:getZ())
-                if nearby and (includeFront or nearby ~= front) and not seenSquare[nearby] then
-                    seenSquare[nearby] = true
-                    local objects = nearby:getObjects()
-                    for i = 0, objects:size() - 1 do
-                        local object = objects:get(i)
-                        if instanceof(object, "BarricadeAble") and not found.barricade then found.barricade = object end
-                        if instanceof(object, "IsoWindow") then
-                            if not found.window then found.window = object end
-                            if not found.windowCurtain then found.windowCurtain = object:HasCurtains() end
-                        elseif instanceof(object, "IsoDoor") and not object:IsOpen() then
-                            if not found.door then found.door = object end
-                            if not found.doorCurtain then found.doorCurtain = object:HasCurtains() end
-                        elseif instanceof(object, "IsoWaveSignal") and not found.radio then
-                            found.radio = object
-                        end
-                        if not found.water and objectHasWater(object)
-                            and not instanceof(object, "IsoClothingDryer")
-                            and not instanceof(object, "IsoClothingWasher") then
-                            found.water = object
-                        end
-                    end
+            local nearby = cell:getGridSquare(square:getX() + dx, square:getY() + dy, square:getZ())
+            if nearby and not seenSquare[nearby] then
+                seenSquare[nearby] = true
+                -- Numpad-style priority, matching the player's mental model:
+                --   5 (self) -> 8 (facing) -> 7/9 (forward diagonals)
+                --   -> 4/6 (direct left/right) -> 1/2/3 (behind)
+                local dot = dx * facingX + dy * facingY
+                local priority
+                local behind
+                if dx == 0 and dy == 0 then
+                    priority, behind = 0, false         -- 5: player's own square
+                elseif front and nearby == front then
+                    priority, behind = 1, false         -- 8: square faced
+                elseif dot > 0 then
+                    priority, behind = 2, false         -- 7/9: forward diagonals
+                elseif dot == 0 then
+                    priority, behind = 3, false         -- 4/6: direct left/right
+                else
+                    priority, behind = 4, true          -- 1/2/3: behind
+                end
+                squareRecords[#squareRecords + 1] = {
+                    square = nearby, dx = dx, dy = dy, priority = priority,
+                    tie = (dy + 1) * 3 + (dx + 1),
+                    behind = behind,
+                }
+            end
+        end
+    end
+    table.sort(squareRecords, function(a, b)
+        if a.priority ~= b.priority then return a.priority < b.priority end
+        return a.tie < b.tie
+    end)
+
+    -- When CGUI owns its native wheel (includeFront=false) it already handles
+    -- the current and facing squares; we only add the other seven to avoid
+    -- duplicating its slices. The SRM / animal / LB paths pass includeFront=true
+    -- and cover all nine here.
+    local function shouldScan(record)
+        if includeFront then return true end
+        if record.dx == 0 and record.dy == 0 then return false end
+        if front and record.square == front then return false end
+        return true
+    end
+
+    local waters, seenWater = {}, {}
+    for _, record in ipairs(squareRecords) do
+        if shouldScan(record) then
+            local objects = record.square:getObjects()
+            for i = 0, objects:size() - 1 do
+                local object = objects:get(i)
+                if instanceof(object, "BarricadeAble") and not found.barricade then found.barricade = object end
+                if instanceof(object, "IsoWindow") then
+                    if not found.window then found.window = object end
+                    if not found.windowCurtain then found.windowCurtain = object:HasCurtains() end
+                elseif instanceof(object, "IsoDoor") and not object:IsOpen() then
+                    if not found.door then found.door = object end
+                    if not found.doorCurtain then found.doorCurtain = object:HasCurtains() end
+                elseif instanceof(object, "IsoWaveSignal") and not found.radio then
+                    found.radio = object
+                end
+                -- includeFront=false is the CGUI path: CGUI only covers the
+                -- player + facing squares, so we may still offer the side and
+                -- rear squares there (no duplication). The forward-only filter
+                -- applies to the SRM / animal / LB wheels that cover all nine.
+                -- Collect all candidates first; the 2-slot budget is applied
+                -- after sorting clean water ahead of tainted water, so a
+                -- contaminated puddle cannot crowd out a clean sink.
+                if ((includeFront and not record.behind) or not includeFront)
+                    and objectHasWater(object)
+                    and not instanceof(object, "IsoClothingDryer")
+                    and not instanceof(object, "IsoClothingWasher")
+                    and not seenWater[object] then
+                    seenWater[object] = true
+                    waters[#waters + 1] = object
                 end
             end
         end
     end
 
-    -- The original CustomGamepadUI scan covers the current and facing squares,
-    -- but only through hasWater(). Find a connected mixed-fluid source on those
-    -- squares (or a nearby square) separately when that check is false. Never
-    -- replace the sink target with its rain collector: the sink's native action
-    -- is what transfers the connected source contents correctly.
-    for dx = -1, 1 do
-        if not found.mixedWater then
-            for dy = -1, 1 do
-                local nearby = cell:getGridSquare(square:getX() + dx, square:getY() + dy, square:getZ())
-                if nearby then
-                    local objects = nearby:getObjects()
-                    for i = 0, objects:size() - 1 do
-                        local object = objects:get(i)
-                        if not objectHasWater(object) and objectHasLiquidExternalSource(object) then
-                            found.mixedWater = object
-                            debugLog("Detected a connected fluid source not reported by hasWater(); using the original sink object for drink/fill actions.")
-                            break
-                        end
-                    end
-                end
-                if found.mixedWater then break end
+    -- Connected fluid sources that hasWater() does not report. Keep the sink
+    -- object itself (not the rain collector behind it) so the native action
+    -- transfers the connected source contents correctly. Same facing filter
+    -- and the same MAX_WATER_SOURCES budget as ordinary water above.
+    local mixedWaters, seenMixed = {}, {}
+    for _, record in ipairs(squareRecords) do
+        local objects = record.square:getObjects()
+        for i = 0, objects:size() - 1 do
+            local object = objects:get(i)
+            if ((includeFront and not record.behind) or not includeFront)
+                and not objectHasWater(object)
+                and objectHasLiquidExternalSource(object)
+                and not seenMixed[object] then
+                seenMixed[object] = true
+                mixedWaters[#mixedWaters + 1] = object
+                debugLog("Detected a connected fluid source not reported by hasWater(); using the original sink object for drink/fill actions.")
             end
         end
-        if found.mixedWater then break end
     end
+
+    -- Merge both candidate pools, then split into clean / tainted while
+    -- preserving the player-centric collection order within each group (no
+    -- table.sort: its stability is not guaranteed under Kahlua). Apply the
+    -- shared 2-slot budget afterwards so clean sources take priority and a
+    -- contaminated puddle cannot crowd out a clean sink.
+    local allWaters = {}
+    for _, water in ipairs(waters) do allWaters[#allWaters + 1] = water end
+    for _, water in ipairs(mixedWaters) do allWaters[#allWaters + 1] = water end
+    waters, mixedWaters = {}, {}
+    for _, water in ipairs(allWaters) do
+        if objectWaterIsTainted(water) then
+            mixedWaters[#mixedWaters + 1] = water
+        else
+            waters[#waters + 1] = water
+        end
+    end
+    -- Clean first, then tainted, up to the shared budget.
+    local ordered = {}
+    for _, water in ipairs(waters) do
+        if #ordered < MAX_WATER_SOURCES then ordered[#ordered + 1] = water end
+    end
+    for _, water in ipairs(mixedWaters) do
+        if #ordered < MAX_WATER_SOURCES then ordered[#ordered + 1] = water end
+    end
+    waters = ordered
 
     local radial = rawget(_G, "SWTileRadialMenu")
     if not radial then return false end
@@ -672,7 +882,8 @@ local function addNeighborSlices(player, menu, includeFront)
         local open
         if isDoorCurtain then open = curtain:isCurtainOpen() else open = curtain:IsOpen() end
         local label = open and "ContextMenu_Close_curtains" or "ContextMenu_Open_curtains"
-        menu:addSlice(getText(label), getTexture("media/ui/icon_sheet.png"), radial.onOpenCloseCurtain, curtain, player)
+        local icon = getCurtainIcon()
+        menu:addSlice(getText(label), icon, radial.onOpenCloseCurtain, curtain, player)
         added = true
     end
     if not player:isOutside() then addCurtain(found.doorCurtain, true) end
@@ -714,7 +925,8 @@ local function addNeighborSlices(player, menu, includeFront)
     end
     if found.radio then
         local label = found.radio:getDeviceData():getIsTurnedOn() and "ContextMenu_Turn_Off" or "ContextMenu_Turn_On"
-        menu:addSlice(getText(label), getTexture("media/ui/icon_light_bulb.png"), radial.onToggleRadio, found.radio, player); added = true
+        local icon = getRadioIcon(found.radio, getTexture("media/ui/icon_light_bulb.png"))
+        menu:addSlice(getText(label), icon, radial.onToggleRadio, found.radio, player); added = true
     end
     local function addWaterSlices(water)
         if not water then return end
@@ -728,8 +940,11 @@ local function addNeighborSlices(player, menu, includeFront)
             menu:addSlice(fillLabel, containerTexture, radial.onTakeWater, water, container, player)
         end
     end
-    if found.water then addWaterSlices(found.water) end
-    if found.mixedWater and found.mixedWater ~= found.water then addWaterSlices(found.mixedWater) end
+    -- One drink/fill pair per reachable source, in player-centric order. The
+    -- label helper appends the source name so the player can tell them apart.
+    for _, water in ipairs(waters) do
+        addWaterSlices(water)
+    end
 
     -- This action was part of GQS's old SWTileRadialMenu implementation. It
     -- belongs in the D-pad Up contextual wheel alongside adjacent-tile actions.
@@ -761,53 +976,119 @@ local function install()
             local menu = player and getPlayerRadialMenu(player:getPlayerNum())
             if not menu then return original(player, ...) end
             if menu:isReallyVisible() then return original(player, ...) end
-            menu:clear()
-            local option = GQS.tileRadialMenu
-            local enabled = option and type(option.getValue) == "function" and option:getValue() == true
-            -- Belt-and-braces: if Smart Radial Menu is loaded, never add our
-            -- slices to the vanilla wheel (SRM only opens its own wheel when the
-            -- vanilla one is empty). install() usually skips this wrapper
-            -- entirely when SRM is active; this guards a late detection.
-            if enabled and rawget(_G, "SRMRadialMenu") ~= nil then enabled = false end
-            local extensionAdded = false
-            local originalAdd = menu.addToUIManager
-            local ownAdd = rawget(menu, "addToUIManager")
-            local originalSlice = menu.addSlice
-            local ownSlice = rawget(menu, "addSlice")
-            if enabled and type(originalSlice) == "function" then
-                menu.addSlice = function(self, label, texture, callback, ...)
-                    local args = { ... }
-                    local radialApi = rawget(_G, "SWTileRadialMenu")
-                    if radialApi and callback == radialApi.onDrink then
-                        label = makeDrinkLabel(tostring(label or ""), args[1])
-                    elseif radialApi and callback == radialApi.onTakeWater then
-                        -- Upstream signature: water source, selected inventory item, player.
-                        label = makeFillLabel(tostring(label or ""), args[2], args[1])
-                        local currentTexture = getWaterContainerTexture(args[2])
-                        if currentTexture then texture = currentTexture end
-                    else
-                        label = decorateRadialObjectAction(callback, tostring(label or ""), args, radialApi)
-                    end
-                    return originalSlice(self, label, texture, callback, unpack(args))
-                end
+
+            -- Take over the D-pad Up wheel using CGUI's own tileRadialMenu
+            -- toggle: when it is ON, build the entire wheel from GQS's 3x3
+            -- scan (same player-centric logic as the SRM path) and skip CGUI's
+            -- native scan completely. That native scan keeps the LAST water
+            -- object in the player/facing squares and also surfaces odd objects
+            -- (e.g. a toilet as "natural water source"), which this replaces.
+            -- No new GQS option is added; the CGUI switch is the single source
+            -- of truth, so turning it off restores CGUI's vanilla wheel.
+            local takeOver = false
+            local reqOk, cgui = pcall(require, "SWModOptions")
+            if reqOk and cgui and cgui.tileRadialMenu then
+                local okValue, value = pcall(function() return cgui.tileRadialMenu:getValue() end)
+                takeOver = okValue and value == true
             end
-            if enabled and type(originalAdd) == "function" then
-                menu.addToUIManager = function(self, ...)
-                    if not extensionAdded then extensionAdded = addNeighborSlices(player, menu) end
-                    return originalAdd(self, ...)
-                end
+            -- When SRM is installed it owns the wheel; never build here.
+            if takeOver and rawget(_G, "SRMRadialMenu") ~= nil then takeOver = false end
+
+            if takeOver then
+                menu:clear()
+                local added = false
+                local okAdd, addResult = pcall(function()
+                    return addNeighborSlices(player, menu, true)
+                end)
+                added = okAdd and addResult == true
+                if not okAdd then debugLog("takeover scan failed: " .. tostring(addResult)) end
+                showIfNeeded(player, menu, added)
+                return added
             end
-            local ok, result = pcall(original, player, ...)
-            menu.addToUIManager = ownAdd
-            menu.addSlice = ownSlice
-            if not ok then error(result) end
-            if enabled and not extensionAdded then
-                extensionAdded = addNeighborSlices(player, menu)
-                showIfNeeded(player, menu, extensionAdded)
-            end
-            return result
+
+            -- Toggle OFF (or SRM active): run CGUI's original wheel untouched.
+            return original(player, ...)
         end
         radial._gqsTileRadialMenuFixInstalled = true
+    end
+
+    -- When the vanilla animal-care wheel already owns the D-pad Up press, add
+    -- our contextual actions into that same wheel instead of staying silent.
+    -- The vehicle wheel keeps exclusive priority and is never modified.
+    -- The wheel is already displayed and focused by AnimalContextMenu, so we
+    -- only add slices and re-center; showIfNeeded is deliberately not called.
+    local function appendToAnimalWheel(player, playerNum)
+        local wheel = nil
+        if type(getPlayerRadialMenu) == "function" then
+            local okWheel, w = pcall(getPlayerRadialMenu, playerNum)
+            if okWheel then wheel = w end
+        end
+        if not wheel then return false end
+        local okAdd, added = pcall(function()
+            return GQSTileRadialMenuFix.addContextSlices(player, wheel, true)
+        end)
+        if not okAdd then
+            debugLog("animal wheel append failed: " .. tostring(added))
+            return false
+        end
+        if added then pcall(function() wheel:center() end) end
+        debugLog("GQS actions appended to the animal-care wheel: " .. tostring(added))
+        return added == true
+    end
+
+    -- Force the Smart Radial Menu wheel open with our contextual actions,
+    -- bypassing the whole upstream chain (vanilla vehicle/animal + CGUI).
+    -- This is the explicit LB + D-pad Up escape hatch: the player asked for
+    -- the mod wheel even though a vehicle or pet would normally claim Up.
+    -- Returns true when a wheel was actually opened.
+    local function openSrmWheelWithGqs(player, playerNum)
+        local srm = rawget(_G, "SRMRadialMenu")
+        if not srm or type(srm.showRadialMenu) ~= "function" then return false end
+
+        -- A stale vanilla wheel must not make SRM think vanilla claimed Up.
+        -- Clear it before opening SRM directly (we are skipping the vanilla
+        -- handler on purpose, so nothing else will clear it for us).
+        if type(getPlayerRadialMenu) == "function" then
+            pcall(function()
+                local vanilla = getPlayerRadialMenu(playerNum)
+                if vanilla then vanilla:clear() end
+            end)
+        end
+        if type(srm.hasSwappedMenu) == "table" then srm.hasSwappedMenu[playerNum] = false end
+
+        -- Always call showRadialMenu(), never reuse SRMRootMenu[playerNum].
+        -- SRM rebuilds and re-displays that menu on every call, and the previous
+        -- one was undisplayed by setHideWhenButtonReleased(DPadUp) when the
+        -- player let go. Reusing the stale menu only added slices to a hidden
+        -- panel, so the second LB+Up press appeared to open nothing.
+        local okShow, errShow = pcall(function() return srm.showRadialMenu(player) end)
+        if not okShow then
+            srmLog("LB+Up: SRM showRadialMenu failed: " .. tostring(errShow))
+            return false
+        end
+        local srmMenu = srm.SRMRootMenu and srm.SRMRootMenu[playerNum]
+        if not srmMenu then
+            srmLog("LB+Up: SRM opened but no root menu for player " .. tostring(playerNum))
+            return false
+        end
+
+        srmMenu.isFromOtherMenu = false
+        local okAdd, addResult = pcall(function()
+            local adapter = {
+                addSlice = function(_, label, texture, callback, ...)
+                    local base = rawget(_G, "ISRadialMenu")
+                    if type(base) == "table" and type(base.addSlice) == "function" then
+                        return base.addSlice(srmMenu, label, texture, callback, ...)
+                    end
+                    return srmMenu:addSlice(label, texture, callback, nil, nil, nil, nil, ...)
+                end,
+            }
+            return GQSTileRadialMenuFix.addContextSlices(player, adapter, true)
+        end)
+        if not okAdd then srmLog("LB+Up: SRM append failed: " .. tostring(addResult)) end
+        if addResult == true then pcall(function() srmMenu:center() end) end
+        srmLog("LB+Up: forced SRM wheel open (added=" .. tostring(addResult == true) .. ")")
+        return true
     end
 
     -- The old combined SWTileRadialMenu checked interaction context before
@@ -820,6 +1101,41 @@ local function install()
         dpadWheels.onDisplayUp = function(joypadData, ...)
             local playerIndex = joypadData and joypadData.player
             local player = playerIndex ~= nil and type(getSpecificPlayer) == "function" and getSpecificPlayer(playerIndex) or nil
+
+            -- RB + D-pad chords (moodle browser / zoom) belong to GQSRBZoom.
+            -- Bail out BEFORE clearing or reopening anything: otherwise an SRM
+            -- fallback reopens SRMRootMenu and steals focus, and the player can
+            -- no longer cycle the top-right moodle icon with RB+Up. This is
+            -- deliberately checked ahead of the tileRadialMenu option because
+            -- RB shortcuts are a separate feature with their own settings.
+            local rbControls = rawget(_G, "GQS_RBControls")
+            if playerIndex ~= nil and rbControls and type(rbControls.isDpadChordOwned) == "function" then
+                local okChord, owned = pcall(rbControls.isDpadChordOwned, playerIndex, "Up")
+                if okChord and owned then
+                    srmLog("RB+Up chord owned by GQSRBZoom; skipping D-pad Up wheel")
+                    return nil
+                end
+            end
+
+            -- LB + D-pad Up escape hatch: force the mod wheel (Smart Radial Menu
+            -- with our actions appended) open, overriding even the vehicle/animal
+            -- wheel. This is intentionally independent of the tileRadialMenu
+            -- master switch and of any native context -- the player explicitly
+            -- asked for the mod wheel with this chord. Only meaningful when SRM
+            -- is installed (it is SRM's wheel we open).
+            local lbOption = GQS.lbUpOpensSrmWheel
+            local lbEnabled = lbOption and type(lbOption.getValue) == "function" and lbOption:getValue() == true
+            if lbEnabled and playerIndex ~= nil and player and rawget(_G, "SRMRadialMenu") then
+                local lbQuery = rbControls and type(rbControls.isLBChordHeld) == "function" and rbControls.isLBChordHeld or nil
+                if lbQuery then
+                    local okLB, held = pcall(lbQuery, playerIndex, "Up")
+                    if okLB and held then
+                        openSrmWheelWithGqs(player, player:getPlayerNum())
+                        return nil
+                    end
+                end
+            end
+
             -- CustomGamepadUI's "Tile Radial Menu" tick box is the master switch
             -- for the whole D-pad Up extension. When it is off we must stay
             -- completely out of the way: no CGUI wheel, no GQS neighbour slices,
@@ -828,19 +1144,21 @@ local function install()
             -- The vanilla vehicle/animal wheel is never touched by us here.
             local option = GQS.tileRadialMenu
             local enabled = option and type(option.getValue) == "function" and option:getValue() == true
-            local hasNativeContext = false
+            local hasVehicleContext = false
+            local hasAnimalContext = false
             if enabled and player then
                 local ok, vehicle = pcall(function() return player:getVehicle() end)
-                hasNativeContext = ok and vehicle ~= nil
-                if not hasNativeContext and ISVehicleMenu and type(ISVehicleMenu.getVehicleToInteractWith) == "function" then
+                hasVehicleContext = ok and vehicle ~= nil
+                if not hasVehicleContext and ISVehicleMenu and type(ISVehicleMenu.getVehicleToInteractWith) == "function" then
                     local vehicleOk, target = pcall(ISVehicleMenu.getVehicleToInteractWith, player)
-                    hasNativeContext = vehicleOk and target ~= nil
+                    hasVehicleContext = vehicleOk and target ~= nil
                 end
-                if not hasNativeContext and AnimalContextMenu and type(AnimalContextMenu.getAnimalToInteractWith) == "function" then
+                if not hasVehicleContext and AnimalContextMenu and type(AnimalContextMenu.getAnimalToInteractWith) == "function" then
                     local animalOk, target = pcall(AnimalContextMenu.getAnimalToInteractWith, player)
-                    hasNativeContext = animalOk and target ~= nil
+                    hasAnimalContext = animalOk and target ~= nil
                 end
             end
+            local hasNativeContext = hasVehicleContext or hasAnimalContext
             -- Smart Radial compatibility: delegate the priority decision to
             -- SRM's own onDisplayUp wrapper so "Show SRM after vanilla menu"
             -- is honoured. The previous version opened the SRM wheel here and
@@ -895,7 +1213,16 @@ local function install()
                     end
                 end
                 if vanillaClaimed then
-                    srmLog("SRM: vanilla vehicle/animal wheel kept priority")
+                    -- Vehicle wheel keeps exclusive priority, unchanged.
+                    -- An animal wheel, however, only has a few care slices:
+                    -- merge our contextual actions into that same wheel so the
+                    -- player can still drink/toggle lights while a pet is near.
+                    if hasAnimalContext and not hasVehicleContext and player then
+                        appendToAnimalWheel(player, playerNum)
+                        srmLog("SRM: animal wheel kept priority; GQS actions appended")
+                    else
+                        srmLog("SRM: vanilla vehicle wheel kept priority")
+                    end
                     return callResult
                 end
 
@@ -943,7 +1270,11 @@ local function install()
             local ok, result = pcall(originalOnDisplayUp, joypadData, ...)
             suppressCustomWheel = previous
             if not ok then error(result) end
-            debugLog("Native vehicle/animal wheel kept priority over the GQS D-pad Up wheel")
+            if hasAnimalContext and not hasVehicleContext and player then
+                appendToAnimalWheel(player, player:getPlayerNum())
+            else
+                debugLog("Native vehicle wheel kept priority over the GQS D-pad Up wheel")
+            end
             return result
         end
         dpadWheels._gqsTileRadialPriorityInstalled = true

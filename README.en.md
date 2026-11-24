@@ -12,7 +12,7 @@ Fills in the parts of B42's controller support that still feel awkward: multi-it
 |---|---|
 | Game version | Build 42.21.0 / 42.22.2 (B42 only, not compatible with B41) |
 | Required dependency | [CustomGamepadUI](https://steamcommunity.com/sharedfiles/filedetails/?id=3001154607) |
-| Build version | `1.5.14.5` |
+| Build version | `1.6.0` |
 | Author | Akatsuki_w |
 | Languages | English / Simplified Chinese |
 
@@ -56,6 +56,10 @@ B42's controller support works, but inventory and panel handling still assume a 
 | [Print-media panels in MP](#18-print-media-panels-in-multiplayer) | `B` `X` `Y` | Flyers / newspapers / magazines respond to the pad in MP again, with no error spam |
 | [Smart Radial Menu compatibility](#19-smart-radial-menu-compatibility) | hold Up | This mod's world-object actions merge into SRM's wheel |
 | [Quick Clothing Actions compatibility](#20-quick-clothing-actions-compatibility) | right wheel "Clothing" | Full gamepad control of the clothing wheel |
+| [Fitness duration memory & hold B](#21-fitness-duration-memory-and-hold-b) | in-panel / hold `B` while exercising | Remembers last exercise duration; hold B to stop |
+| [Map marker sharing](#22-map-marker-sharing) | `LS` on the map | Auto-share new markers; LS cycles the sharing type |
+| [Weight column colour coding](#23-weight-column-colour-coding) | — | Weight numbers change colour by size (2 / 5 / 10 tiers) |
+| [Icons Inventory compatibility](#24-icons-inventory-compatibility) | — | Hold-X transfer and shoulder container switching survive its overrides |
 
 Every binding can be changed in **Options → Mod Options → Gamepad QoL Suite**.
 
@@ -77,6 +81,8 @@ Every binding can be changed in **Options → Mod Options → Gamepad QoL Suite*
 - Fixes RT+B accidentally closing HUD status indicators (e.g. Modern Status) and hover detail popups.
 - New: info-panel nutrition readout, hold-B fishing exit, drying-rack workstation panel gamepad support, and the non-English dish-name fix — see sections 12–16 below.
 - New: hold-B washing exit, print-media panel fix for multiplayer, and Smart Radial Menu / Quick Clothing Actions compatibility — see sections 17–20 below.
+- New: fitness duration memory, map marker sharing, weight column colour coding, and Icons Inventory compatibility — see sections 21–24 below.
+- The Up wheel's neighbour scan now covers the full 3x3 grid sorted around the player; clean water is prioritised with a maximum of two sources. Without SRM the mod fully takes over CGUI's native Up wheel (toggle lives in CGUI settings). Light switches are all listed with object names to tell them apart.
 - The drying-rack panel's drying readouts (progress, time left, temperature, humidity, drying rate) are now a replay of vanilla's own tooltip, laid out as a card grid; in-progress slots are gamepad-selectable.
 - Multi-selection now supports **holding `R3` while pushing the D-pad** to sweep-select a run of rows.
 - With Smart Radial Menu installed, this mod's Up-wheel world-object actions merge into SRM's wheel — one ring, both mods, no duplicates.
@@ -357,6 +363,42 @@ Now:
 
 > Known limitation: QCA itself hardcodes `getSpecificPlayer(0)` when gathering items, so **split-screen player 2** sees player 1's clothing. Single-player and multiplayer (both player 0) are unaffected.
 
+## 21. Fitness duration memory and hold B
+
+- **Duration memory**: when you actually start exercising (press `X` / click OK), the chosen duration is remembered, so the panel opens on it next time. The "default fitness duration" slider in Mod Options remains the fallback for first use or when no memory exists. Saved per player, so split-screen players do not interfere.
+- **Hold B to stop**: while an exercise is in progress, hold `B` for **0.5 s** to stop it, with a progress ring. Three distinct cases:
+  - Exercising with focus on the character/world — hold B to stop;
+  - Fitness panel open — `B` keeps its vanilla behaviour (expand / collapse etc.);
+  - Focus on another panel such as the backpack — `B` only operates that panel and never stops the exercise.
+
+## 22. Map marker sharing
+
+- In multiplayer, markers you draw on the map are now shared with everyone by default (can be turned off in Mod Options).
+- With the world map open, press **`LS`** to cycle the sharing type for **new markers**: **Everyone → Faction → Safehouse → Private → Everyone**. The bottom-left hint shows the current type.
+- The type chosen with LS is remembered per player; the "default sharing type" in Mod Options applies only on first use or when no memory exists. Turning the master switch off disables both LS cycling and auto-sharing.
+- Only affects markers created afterwards; existing markers are untouched.
+
+## 23. Weight column colour coding
+
+Once CleanUI's **weight column** is enabled, weight numbers are colour-coded by size:
+
+| Weight | Colour |
+|---|---|
+| below 2 | unchanged |
+| 2 - 4.9 | pale yellow |
+| 5 - 9.9 | amber |
+| 10 and above | orange-red |
+
+Toggle: Mod Options → [Container Operations] → "Colour-code the weight column", **on by default**. CleanUI's weight column must be enabled first; without CleanUI, or with that column off, this feature does nothing. Group totals on category header rows are coloured too; other columns are unaffected.
+
+## 24. Icons Inventory compatibility
+
+[Icons Inventory](https://steamcommunity.com/sharedfiles/filedetails/?id=3718412967) replaces the inventory with an icon grid. With both installed:
+
+- Hold-`X` container transfer keeps working — wrappers are now re-installed by function-reference comparison instead of a one-shot flag, so they survive its whole-table override.
+- `LB/RB` + Left/Right container switching no longer cycles one extra container on shoulder release.
+- Behaviour is unchanged when Icons Inventory is not installed.
+
 ---
 
 ## Mod Options panel
@@ -398,6 +440,7 @@ Include your game version, mod version, reproduction steps, and the relevant lin
 - **Verified compatible**:
   - [Smart Radial Menu](https://steamcommunity.com/sharedfiles/filedetails/?id=3494108029) — this mod yields the Up wheel and merges its world-object actions into SRM's wheel, see [section 19](#19-smart-radial-menu-compatibility)
   - [Quick Clothing Actions](https://steamcommunity.com/sharedfiles/filedetails/?id=3790742081) — "Clothing" entry in the right wheel with full gamepad support, see [section 20](#20-quick-clothing-actions-compatibility)
+  - [Icons Inventory](https://steamcommunity.com/sharedfiles/filedetails/?id=3718412967) — hold-X transfer and shoulder container switching survive its overrides, see [section 24](#24-icons-inventory-compatibility)
 - **Not recommended alongside**: other mods that rewrite inventory layout, selection state, or item transfer (duplicate key interception)
 - **Multiplayer**: includes one server-side module (liquid-type sync for mixed-liquid auto-drink); both client and server need the mod. The print-media fix is client-only and runs on each client
 - **Never modified**: vanilla Lua, CustomGamepadUI's Workshop files, CleanUI, Smart Radial Menu, Quick Clothing Actions

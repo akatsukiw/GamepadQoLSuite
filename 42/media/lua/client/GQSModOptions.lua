@@ -56,6 +56,7 @@ if options then
 
     options:addSeparator()
     options:addTitle("UI_GQOS_containerOperations")
+    GQS.weightColorEnabled = options:addTickBox("weightColorEnabled", "UI_GQOS_weightColorEnabled", true, "UI_GQOS_weightColorEnabled_tooltip")
     GQS.combinedContainerSwitch = options:addTickBox("combinedContainerSwitch", "UI_GQOS_combinedContainerSwitch", true, "UI_GQOS_combinedContainerSwitch_tooltip")
     options:addTitle("UI_GQOS_ContainerPageNavTitle")
     GQS.containerPageNavMode = options:addComboBox("containerPageNavMode", "UI_GQOS_ContainerPageNavMode", "UI_GQOS_ContainerPageNavMode_tooltip")
@@ -163,6 +164,9 @@ if options then
     GQS.rightRadialQuickClothingEnabled = options:addTickBox("rightRadialQuickClothingEnabled", "UI_GQOS_RightRadialQuickClothingEnabled", true, "UI_GQOS_RightRadialQuickClothingEnabled_tooltip")
     GQS.rightRadialSmashWindowEnabled = options:addTickBox("rightRadialSmashWindowEnabled", "UI_GQOS_RightRadialSmashWindowEnabled", true, "UI_GQOS_RightRadialSmashWindowEnabled_tooltip")
     GQS.rightRadialLightSwitchEnabled = options:addTickBox("rightRadialLightSwitchEnabled", "UI_GQOS_RightRadialLightSwitchEnabled", true, "UI_GQOS_RightRadialLightSwitchEnabled_tooltip")
+    -- Escape hatch: hold LB + D-pad Up to force the mod (Smart Radial) wheel
+    -- open even when a vehicle or pet would otherwise claim the vanilla wheel.
+    GQS.lbUpOpensSrmWheel = options:addTickBox("lbUpOpensSrmWheel", "UI_GQOS_LbUpOpensSrmWheel", true, "UI_GQOS_LbUpOpensSrmWheel_tooltip")
 
     options:addTitle("UI_GQOS_RTBFocusTitle")
     GQS.rtBFocusEnabled = options:addTickBox("rtBFocusEnabled", "UI_GQOS_RTBFocusEnabled", true, "UI_GQOS_RTBFocusEnabled_tooltip")
@@ -179,10 +183,20 @@ if options then
     GQS.mixedLiquidAutoDrinkEnabled = options:addTickBox("mixedLiquidAutoDrinkEnabled", "UI_GQOS_MixedLiquidAutoDrinkEnabled", true, "UI_GQOS_MixedLiquidAutoDrinkEnabled_tooltip")
     GQS.fishingHoldToStopEnabled = options:addTickBox("fishingHoldToStopEnabled", "UI_GQOS_FishingHoldToStopEnabled", true, "UI_GQOS_FishingHoldToStopEnabled_tooltip")
     GQS.washHoldToStopEnabled = options:addTickBox("washHoldToStopEnabled", "UI_GQOS_WashHoldToStopEnabled", true, "UI_GQOS_WashHoldToStopEnabled_tooltip")
+    GQS.fitnessHoldToStopEnabled = options:addTickBox("fitnessHoldToStopEnabled", "UI_GQOS_FitnessHoldToStopEnabled", true, "UI_GQOS_FitnessHoldToStopEnabled_tooltip")
     GQS.selectWheelPvpOptionEnabled = options:addTickBox("selectWheelPvpOptionEnabled", "UI_GQOS_SelectWheelPvpOptionEnabled", false, "UI_GQOS_SelectWheelPvpOptionEnabled_tooltip")
     GQS.disableSmashWindowBEnabled = options:addTickBox("disableSmashWindowBEnabled", "UI_GQOS_DisableSmashWindowBEnabled", false, "UI_GQOS_DisableSmashWindowBEnabled_tooltip")
     GQS.evolvedNameFixEnabled = options:addTickBox("evolvedNameFixEnabled", "UI_GQOS_EvolvedNameFixEnabled", true, "UI_GQOS_EvolvedNameFixEnabled_tooltip")
     GQS.flyerJoypadFixEnabled = options:addTickBox("flyerJoypadFixEnabled", "UI_GQOS_FlyerJoypadFixEnabled", true, "UI_GQOS_FlyerJoypadFixEnabled_tooltip")
+    -- Auto-share markers drawn on the world map (multiplayer). LS on the map
+    -- cycles the type and remembers it per player; this combo is the fallback
+    -- default for first run / no remembered choice (same pattern as fitness).
+    GQS.mapAutoShareEnabled = options:addTickBox("mapAutoShareEnabled", "UI_GQOS_MapAutoShareEnabled", true, "UI_GQOS_MapAutoShareEnabled_tooltip")
+    GQS.mapAutoShareDefaultType = options:addComboBox("mapAutoShareDefaultType", "UI_GQOS_MapAutoShareDefaultType", "UI_GQOS_MapAutoShareDefaultType_tooltip")
+    GQS.mapAutoShareDefaultType:addItem("UI_GQOS_ShareEveryone", true)
+    GQS.mapAutoShareDefaultType:addItem("UI_GQOS_ShareFaction", false)
+    GQS.mapAutoShareDefaultType:addItem("UI_GQOS_ShareSafehouse", false)
+    GQS.mapAutoShareDefaultType:addItem("UI_GQOS_SharePrivate", false)
     -- Off by default: B42.22.2 fixed furniture rotation upstream, so this fix
     -- is only needed on B42.21 and older.
     GQS.furnitureRotateFixEnabled = options:addTickBox("furnitureRotateFixEnabled", "UI_GQOS_FurnitureRotateFixEnabled", false, "UI_GQOS_FurnitureRotateFixEnabled_tooltip")

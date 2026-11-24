@@ -29,6 +29,13 @@ pcall(require, "TimedActions/ISTimedActionQueue")
 local HOLD_MS = 500
 local TAG = "[GQS WashHold]"
 
+-- Shared across GQS hold-to-stop modules. CancelAction is a single global
+-- binding: if two modules suspend it independently, one restoring it would
+-- re-enable cancellation while the other still needs it suspended. Exposing
+-- these two functions lets the fitness hold module share the same refcount.
+local GQSWashHoldToStop = rawget(_G, "GQSWashHoldToStop") or {}
+_G.GQSWashHoldToStop = GQSWashHoldToStop
+
 -- Actions that count as "washing": your own body or a piece of clothing.
 local WASH_CLASSES = { "ISWashYourself", "ISWashClothing", "ISWringClothing" }
 
@@ -521,6 +528,9 @@ local function guardBindingLeak()
         pcall(function() binding:setDefault() end)
     end
 end
+
+GQSWashHoldToStop.suspendCancelBinding = suspendCancelBinding
+GQSWashHoldToStop.restoreCancelBinding = restoreCancelBinding
 
 install()
 log("loaded: hold B " .. tostring(HOLD_MS) .. "ms to stop washing")

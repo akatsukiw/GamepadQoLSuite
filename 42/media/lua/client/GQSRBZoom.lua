@@ -213,6 +213,37 @@ GQS_RBControls.getButtonAction = getConfiguredActionButton
 GQS_RBControls.isButtonChordDown = isActionButtonChordDown
 GQS_RBControls.getButtonChordState = getActionButtonChordState
 
+-- Read-only query for the D-pad Up wheel wrapper: is this player currently
+-- pressing RB + a direction that our own shortcut owns (moodles / zoom)?
+-- The wheel wrapper must yield before it clears/reopens any radial, otherwise
+-- an SRM fallback reopens a wheel and steals focus from the moodle browser.
+-- Uses the exact same eligibility rules as installDPadSuppression below so the
+-- two modules cannot disagree about who owns the chord.
+GQS_RBControls.isDpadChordOwned = function(playerIndex, directionName)
+    if getConfiguredAction(directionName) == "none" then return false end
+    if not areInventoryWindowsClosed(playerIndex) or not hasWorldFocus(playerIndex) then return false end
+    local bind = getJoypadBind(playerIndex)
+    if bind < 0 or not isButtonDown("RightBump", bind) then return false end
+    local buttonName = BUTTON_BY_DIRECTION[directionName]
+    return buttonName ~= nil and isButtonDown(buttonName, bind)
+end
+
+-- Read-only query for the D-pad Up wheel wrapper: is the player physically
+-- holding LB (+ the given direction)? LB is NOT one of our RB shortcut
+-- modifiers, so this deliberately ignores getConfiguredAction(); it only
+-- reports the raw chord so the wheel module can decide on its own (via its
+-- separate "LB + Up opens the mod wheel" option) whether to force SRM open.
+-- Same world-focus / inventory gating as the RB query so an inventory page's
+-- native LB+Up navigation is never hijacked.
+GQS_RBControls.isLBChordHeld = function(playerIndex, directionName)
+    if not areInventoryWindowsClosed(playerIndex) or not hasWorldFocus(playerIndex) then return false end
+    local bind = getJoypadBind(playerIndex)
+    if bind < 0 or not isButtonDown("LeftBump", bind) then return false end
+    if directionName == nil then return true end
+    local buttonName = BUTTON_BY_DIRECTION[directionName]
+    return buttonName ~= nil and isButtonDown(buttonName, bind)
+end
+
 -- Resolve the local player robustly because JoypadControllerData.joypad.player
 -- can be exposed as either a player index or an IsoPlayer object across builds.
 local function resolvePlayerIndex(value)

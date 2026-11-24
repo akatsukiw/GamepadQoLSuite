@@ -25,6 +25,7 @@ local DEFAULT_CATEGORIES = {
     washHold = false, -- wash/self-wash hold-to-stop; failures still print unconditionally via warn()
     srmCompat = false, -- Smart Radial Menu wheel compatibility
     qcaCompat = false, -- Quick Clothing Actions wheel compatibility
+    weightColor = false, -- CleanUI weight column colour tiers
 }
 
 local LABELS = {
@@ -51,6 +52,7 @@ local LABELS = {
     washHold = "Wash Hold",
     srmCompat = "Smart Radial Compat",
     qcaCompat = "Quick Clothing Compat",
+    weightColor = "Weight Colour",
 }
 
 local config = rawget(_G, "GQS_DEBUG_CONFIG")
